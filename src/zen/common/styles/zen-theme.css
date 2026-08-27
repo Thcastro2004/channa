@@ -92,7 +92,11 @@
   --in-content-accent-color-active: currentColor !important;
 
   /* This is like the secondary button */
-  --in-content-button-background: transparent !important;
+  --in-content-button-background: color-mix(
+    in srgb,
+    currentColor,
+    transparent 90%
+  ) !important;
   --in-content-button-text-color: var(--zen-secondary-btn-color) !important;
   --in-content-button-background-hover: color-mix(
     in srgb,
@@ -253,7 +257,7 @@
   --zen-active-tab-scale: 0.985;
 
   /* Define tab hover background color */
-  --tab-hover-background-color: var(--toolbarbutton-hover-background);
+  --tab-background-color-hover: var(--toolbarbutton-hover-background);
 
   /* Sidebar Notifications */
   --zen-sidebar-notification-bg: color-mix(
