@@ -35,3 +35,8 @@ build/signing/private_key.pem
 build/signing/private_key.p12
 
 bloat-dump.log
+
+# local review scratch
+.zen-review/
+# stray build log at repo root (the real mach lives in engine/)
+/mach
