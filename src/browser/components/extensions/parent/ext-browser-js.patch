@@ -1,29 +1,49 @@
 diff --git a/browser/components/extensions/parent/ext-browser.js b/browser/components/extensions/parent/ext-browser.js
-index 91adc6bc3649af47745818e6f9d00cbbdffc35a5..e221b077dbfbe20c8696732f003bd5809d761a02 100644
+index 91adc6bc36..d54b23f303 100644
 --- a/browser/components/extensions/parent/ext-browser.js
 +++ b/browser/components/extensions/parent/ext-browser.js
-@@ -362,6 +362,7 @@ class TabTracker extends TabTrackerBase {
+@@ -362,6 +362,9 @@ class TabTracker extends TabTrackerBase {
    }
  
    getId(nativeTab) {
-+    if (nativeTab.hasAttribute("zen-empty-tab")) return -1;
++    if (nativeTab.hasAttribute("zen-empty-tab")) {
++      return -1;
++    }
      let id = this._tabs.get(nativeTab);
      if (id) {
        return id;
-@@ -395,6 +396,7 @@ class TabTracker extends TabTrackerBase {
-     if (nativeTab.documentGlobal.closed) {
-       throw new Error("Cannot attach ID to a tab in a closed window.");
-     }
-+    if (nativeTab.hasAttribute("zen-empty-tab")) return;
+@@ -389,6 +392,9 @@ class TabTracker extends TabTrackerBase {
+   }
  
-     this._tabs.set(nativeTab, id);
-     this._tabIds.set(id, nativeTab);
-@@ -1262,6 +1264,10 @@ class TabManager extends TabManagerBase {
+   setId(nativeTab, id) {
++    if (nativeTab.hasAttribute("zen-empty-tab")) {
++      return;
++    }
+     if (!nativeTab.parentNode) {
+       throw new Error("Cannot attach ID to a destroyed tab.");
+     }
+@@ -754,6 +760,15 @@ class TabTracker extends TabTrackerBase {
+     }
+ 
+     const nativeTab = this.getTabForBrowser(browser);
++    if (
++      nativeTab &&
++      (!nativeTab.parentNode || nativeTab.documentGlobal.closed)
++    ) {
++      // A late webNavigation event can arrive after a standalone window has
++      // already removed its temporary tab. Treat it as detached so extension
++      // listeners drop the event instead of trying to assign a new tab ID.
++      return { tabId: -1, windowId: -1 };
++    }
+     if (nativeTab) {
+       // If window was about:addons, use the browser window instead.
+       window = nativeTab.documentGlobal;
+@@ -1262,6 +1277,10 @@ class TabManager extends TabManagerBase {
    }
  
    canAccessTab(nativeTab) {
 +    if (nativeTab.hasAttribute("zen-empty-tab")) {
-+      return false
++      return false;
 +    }
 +
      // Check private browsing access at browser window level.

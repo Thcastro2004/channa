@@ -4,6 +4,13 @@
 
 import { JSONFile } from "resource://gre/modules/JSONFile.sys.mjs";
 
+const lazy = {};
+
+ChromeUtils.defineESModuleGetters(lazy, {
+  gZenStandaloneWindowManager:
+    "resource:///modules/zen/standalonewindow/ZenStandaloneWindowManager.sys.mjs",
+});
+
 class nsZenSpaceRoutingManager {
   #file = null;
   #saveFilename = "zen-space-routing.jsonlz4";
@@ -85,10 +92,40 @@ class nsZenSpaceRoutingManager {
     let targetRoute = null;
     let targetWorkspaceName = null;
 
+    const skipType = this.#shouldSkipProcessing(options, win);
+
+    // Pinned, grouped and explicitly unrouted tabs keep their normal behaviour
+    // even when they arrive from outside Zen, so this guard alone blocks the
+    // standalone-window attempt below.
+    if (skipType == nsZenSpaceRoutingManager.SKIP_TYPE.SKIPPED_TAB) {
+      return {
+        shouldEarlyExit: false,
+        userContextId,
+        isRouteFound,
+        targetRoute,
+        targetWorkspaceName,
+      };
+    }
+
+    // Standalone windows do not need spaces to be ready, so this still runs for
+    // a RESTORED_TAB (gZenStartup still settling) - which is exactly the case
+    // for the very first external link that launches Zen from a cold start.
+    // Without this, that first link would silently fall through to whatever
+    // space happens to be current once startup finishes.
     if (
-      this.#shouldSkipProcessing(options, win) !=
-      nsZenSpaceRoutingManager.SKIP_TYPE.NONE
+      this.shouldOpenExternalLinkInStandaloneWindow(uriString, options, win) &&
+      this.openExternalLinkInStandaloneWindow(uriString, options, win)
     ) {
+      return {
+        shouldEarlyExit: true,
+        userContextId,
+        isRouteFound,
+        targetRoute,
+        targetWorkspaceName,
+      };
+    }
+
+    if (skipType != nsZenSpaceRoutingManager.SKIP_TYPE.NONE) {
       return {
         shouldEarlyExit: false,
         userContextId,
@@ -217,6 +254,45 @@ class nsZenSpaceRoutingManager {
     }
 
     return nsZenSpaceRoutingManager.SKIP_TYPE.NONE;
+  }
+
+  /**
+   * Checks whether an external URL should use the standalone-window path.
+   *
+   * @param {string} uriString - The URI as a string
+   * @param {object} options - The tab creation options
+   * @param {Window} win - The owning window
+   * @returns {boolean} True when standalone-window routing should be attempted
+   */
+  shouldOpenExternalLinkInStandaloneWindow(uriString, options, win) {
+    return (
+      typeof uriString === "string" &&
+      !!uriString &&
+      !!options?.fromExternal &&
+      !!win &&
+      // A standalone window must never spawn another standalone window.
+      !win._zenStandaloneWindow &&
+      Services.prefs.getBoolPref("zen.standalone-window.enabled", false)
+    );
+  }
+
+  /**
+   * Hands an eligible external link to the standalone-window manager.
+   *
+   * Falls back to the normal addTab/space-routing flow when the manager cannot
+   * create the window.
+   *
+   * @param {string} uriString - The URI as a string
+   * @param {object} options - The tab creation options
+   * @param {Window} win - The owning window
+   * @returns {boolean} True when the URL was handled by a standalone window
+   */
+  openExternalLinkInStandaloneWindow(uriString, options, win) {
+    return lazy.gZenStandaloneWindowManager.openExternalLinkStandaloneWindow({
+      uriString,
+      options,
+      openerWindow: win,
+    });
   }
 
   /**

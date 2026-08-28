@@ -1,0 +1,12 @@
+diff --git a/browser/components/asrouter/modules/ASRouterTargeting.sys.mjs b/browser/components/asrouter/modules/ASRouterTargeting.sys.mjs
+index 075208d5e6..7d1cda04d2 100644
+--- a/browser/components/asrouter/modules/ASRouterTargeting.sys.mjs
++++ b/browser/components/asrouter/modules/ASRouterTargeting.sys.mjs
+@@ -337,6 +337,7 @@ function CheckBrowserNeedsUpdate(
+       const now = Date.now();
+       if (
+         !AppConstants.MOZ_UPDATER ||
++        AppConstants.MOZ_UPDATE_CHANNEL === "unofficial" ||
+         now - this._lastUpdated < updateInterval
+       ) {
+         return this._value;

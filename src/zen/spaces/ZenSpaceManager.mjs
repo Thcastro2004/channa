@@ -84,6 +84,9 @@ class nsZenWorkspaces {
     this._workspaceChangeInProgress = false;
 
     if (!this.shouldHaveWorkspaces) {
+      // Nothing will initialize pinned/workspace state in this window, but
+      // generic browser startup consumers may still wait for both barriers.
+      this._resolvePinnedInitialized();
       this._resolveInitialized();
       console.warn(
         "gZenWorkspaces: !!! gZenWorkspaces is disabled in hidden windows !!!"
@@ -264,6 +267,11 @@ class nsZenWorkspaces {
   }
 
   #initializeEmptyTab() {
+    if (window._zenStandaloneWindow) {
+      // A standalone window exists to hold exactly one external page, so it
+      // must not gain the empty tab every other window starts with.
+      return;
+    }
     for (const tab of gBrowser.tabs) {
       // Check if session store has an empty tab
       if (tab.hasAttribute("zen-empty-tab") && !tab.pinned) {
@@ -629,6 +637,14 @@ class nsZenWorkspaces {
   }
 
   get shouldHaveWorkspaces() {
+    // A standalone window contains one transient browser and does not own a
+    // Zen space. BrowserWindowTracker sets this flag before browser startup,
+    // so rejecting the window here prevents workspace state, DOM sections and
+    // listeners from being initialized at all instead of hiding them later.
+    if (window._zenStandaloneWindow) {
+      return false;
+    }
+
     if (typeof this._shouldHaveWorkspaces === "undefined") {
       let chromeFlags = window.docShell.treeOwner
         .QueryInterface(Ci.nsIInterfaceRequestor)
@@ -1618,7 +1634,11 @@ class nsZenWorkspaces {
   }
 
   async changeWorkspace(workspace, ...args) {
-    if (!this.workspaceEnabled) {
+    // Standalone windows hold exactly one external page and are never
+    // assigned to a workspace (see specs/external-link-standalone-window.md).
+    // Without this guard, #initializeWorkspaces()'s onInit call below runs a
+    // real workspace switch for every standalone window on open.
+    if (!this.workspaceEnabled || window._zenStandaloneWindow) {
       return workspace;
     }
     this.#currentSpaceSwitchContext.animations.forEach(animation => {

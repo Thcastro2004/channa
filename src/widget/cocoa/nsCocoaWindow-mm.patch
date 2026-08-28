@@ -1,8 +1,16 @@
 diff --git a/widget/cocoa/nsCocoaWindow.mm b/widget/cocoa/nsCocoaWindow.mm
-index 2efd02e4a92433fd29bbfdb707aa81cfec45031e..3b763c3927f07e529c826f8e4f62bc80a324b247 100644
+index 2efd02e4a9..2ca554e699 100644
 --- a/widget/cocoa/nsCocoaWindow.mm
 +++ b/widget/cocoa/nsCocoaWindow.mm
-@@ -86,6 +86,7 @@
+@@ -72,6 +72,7 @@
+ #include "gfxPlatform.h"
+ #include "qcms.h"
+ 
++#import <objc/runtime.h>
+ #include <algorithm>
+ #include "mozilla/AutoRestore.h"
+ #include "mozilla/BasicEvents.h"
+@@ -86,6 +87,7 @@
  #include "mozilla/StaticPrefs_gfx.h"
  #include "mozilla/StaticPrefs_ui.h"
  #include "mozilla/StaticPrefs_widget.h"
@@ -10,7 +18,55 @@ index 2efd02e4a92433fd29bbfdb707aa81cfec45031e..3b763c3927f07e529c826f8e4f62bc80
  #include "mozilla/WritingModes.h"
  #include "mozilla/dom/Document.h"
  #include "mozilla/layers/CompositorBridgeChild.h"
-@@ -1332,6 +1333,110 @@ - (NSRect)_opaqueRectForWindowMoveWhenInTitlebar {
+@@ -104,10 +106,33 @@
+ }  // namespace layers
+ }  // namespace mozilla
+ using namespace mozilla::layers;
++
++extern Class ZenConsumePreparedPanelClass();
++extern bool ZenWindowActsAsMain(NSWindow* aWindow);
++extern void ZenReleaseSuppressedLaunchActivation(bool aActivate);
++
+ using namespace mozilla::widget;
+ using namespace mozilla::gl;
+ using namespace mozilla;
+ 
++// ZenStandalonePanel installs its own tracking area. Forward these calls to
++// the tracker that normally receives them through ChildView.
++void ZenWindowMouseEntered(NSEvent* aEvent) {
++  ChildViewMouseTracker::MouseEnteredWindow(aEvent);
++}
++
++void ZenWindowMouseExited(NSEvent* aEvent) {
++  ChildViewMouseTracker::MouseExitedWindow(aEvent);
++}
++
++void ZenWindowMouseMoved(NSEvent* aEvent) {
++  ChildViewMouseTracker::MouseMoved(aEvent);
++}
++
++void ZenWindowDestroyed(NSWindow* aWindow) {
++  ChildViewMouseTracker::OnDestroyWindow(aWindow);
++}
++
+ BOOL sTouchBarIsInitialized = NO;
+ 
+ // defined in nsMenuBarX.mm
+@@ -1217,11 +1242,11 @@ static LayoutDeviceIntRect FindFirstRectOfType(
+ 
+   UpdateVibrancy(aThemeGeometries);
+ 
+-  if (![mChildView.window isKindOfClass:[ToolbarWindow class]]) {
++  if (![mChildView.window respondsToSelector:@selector(placeWindowButtons:)]) {
+     return;
+   }
+ 
+-  ToolbarWindow* win = (ToolbarWindow*)[mChildView window];
++  id win = [mChildView window];
+ 
+   // Update titlebar control offsets.
+   LayoutDeviceIntRect windowButtonRect =
+@@ -1332,6 +1357,110 @@ - (NSRect)_opaqueRectForWindowMoveWhenInTitlebar {
  }
  @end
  
@@ -121,7 +177,20 @@ index 2efd02e4a92433fd29bbfdb707aa81cfec45031e..3b763c3927f07e529c826f8e4f62bc80
  void nsCocoaWindow::UpdateWindowDraggingRegion(
      const LayoutDeviceIntRegion& aRegion) {
    // mChildView returns YES from mouseDownCanMoveWindow, so we need to put
-@@ -4919,6 +5024,10 @@ - (BOOL)wantsBestResolutionOpenGLSurface {
+@@ -4843,7 +4972,11 @@ - (BOOL)wantsBestResolutionOpenGLSurface {
+       return YES;
+   }
+ 
+-  if (!topLevelWindow || ([topLevelWindow isMainWindow] && !aIsClickThrough) ||
++  // A Zen standalone window is an auxiliary panel, but Gecko must treat it as
++  // active while it is key so clicks and mouse movement reach its ChildView.
++  if (!topLevelWindow ||
++      (([topLevelWindow isMainWindow] || ZenWindowActsAsMain(topLevelWindow)) &&
++       !aIsClickThrough) ||
+       [aEvent type] == NSEventTypeOtherMouseDown ||
+       (([aEvent modifierFlags] & NSEventModifierFlagCommand) != 0 &&
+        [aEvent type] != NSEventTypeMouseMoved))
+@@ -4919,6 +5052,10 @@ - (BOOL)wantsBestResolutionOpenGLSurface {
  nsCocoaWindow::~nsCocoaWindow() {
    NS_OBJC_BEGIN_TRY_IGNORE_BLOCK;
  
@@ -132,3 +201,225 @@ index 2efd02e4a92433fd29bbfdb707aa81cfec45031e..3b763c3927f07e529c826f8e4f62bc80
    RemoveAllChildren();
    if (mWindow && mWindowMadeHere) {
      CancelAllTransitions();
+@@ -5163,6 +5300,12 @@ static unsigned int WindowMaskForBorderStyle(BorderStyle aBorderStyle) {
+     windowClass = [BorderlessWindow class];
+   }
+ 
++  // Preparation is one-shot. It lets the standalone/global-search opener
++  // select the native NSPanel subclass without affecting unrelated windows.
++  if (Class zenPanelClass = ZenConsumePreparedPanelClass()) {
++    windowClass = zenPanelClass;
++  }
++
+   // Create the window
+   mWindow = [[windowClass alloc] initWithContentRect:contentRect
+                                            styleMask:features
+@@ -5499,6 +5642,7 @@ static void SyncPopoverBounds(NSPopover* aPopover,
+     if (NSApp.activationPolicy != NSApplicationActivationPolicyRegular) {
+       NSApp.activationPolicy = NSApplicationActivationPolicyRegular;
+       PR_SetEnv("MOZ_APP_NO_DOCK=");
++      ZenReleaseSuppressedLaunchActivation(!ZenWindowActsAsMain(mWindow));
+     }
+ 
+     // Don't try to show a popup when the parent isn't visible or is minimized.
+@@ -5718,7 +5862,6 @@ static void SyncPopoverBounds(NSPopover* aPopover,
+   nsMenuPopupFrame* popupFrame = GetPopupFrame();
+   return [mWindow isKindOfClass:[PopupWindow class]] &&
+          [(PopupWindow*)mWindow usePopover] && popupFrame &&
+-         popupFrame->ShouldFollowAnchor() &&
+          !popupFrame->PopupElement().GetBoolAttr(nsGkAtoms::nonnative);
+ }
+ 
+@@ -6950,6 +7093,27 @@ static nsSizeMode GetWindowSizeMode(NSWindow* aWindow, bool aFullScreen) {
+   return nsSizeMode_Normal;
+ }
+ 
++// The tiling state lives in a private NSWindow ivar "_tilingStateController"
++// (an _NSWMWindowTilingStateController). That controller's -tilingState returns
++// a non-nil _WMWindowTilingState only while the window is tiled by the system
++// window manager. None of this is public API, so it is all guarded and degrades
++// to false if the internals ever change.
++static bool WindowIsTiled(NSWindow* aWindow) {
++  if (!aWindow) {
++    return false;
++  }
++  static Ivar sControllerIvar =
++      class_getInstanceVariable([NSWindow class], "_tilingStateController");
++  if (!sControllerIvar) {
++    return false;
++  }
++  id controller = object_getIvar(aWindow, sControllerIvar);
++  if (![controller respondsToSelector:@selector(tilingState)]) {
++    return false;
++  }
++  return [controller performSelector:@selector(tilingState)] != nil;
++}
++
+ void nsCocoaWindow::ReportMoveEvent() {
+   NS_OBJC_BEGIN_TRY_IGNORE_BLOCK;
+ 
+@@ -6963,6 +7127,7 @@ static nsSizeMode GetWindowSizeMode(NSWindow* aWindow, bool aFullScreen) {
+   mInReportMoveEvent = true;
+ 
+   UpdateBounds();
++  SetIsTiled(WindowIsTiled(mWindow));
+ 
+   // The zoomed state can change when we're moving, in which case we need to
+   // update our internal mSizeMode. This can happen either if we're maximized
+@@ -7057,6 +7222,7 @@ static nsSizeMode GetWindowSizeMode(NSWindow* aWindow, bool aFullScreen) {
+   NS_OBJC_BEGIN_TRY_IGNORE_BLOCK;
+ 
+   UpdateBounds();
++  SetIsTiled(WindowIsTiled(mWindow));
+   LayoutDeviceIntRect innerBounds = GetClientBounds();
+   if (mWidgetListener) {
+     mWidgetListener->WindowResized(this, innerBounds.Size());
+@@ -7813,8 +7979,8 @@ - (void)windowDidBecomeMain:(NSNotification*)aNotification {
+     [WindowDelegate paintMenubarForWindow:window];
+   }
+ 
+-  if ([window isKindOfClass:[ToolbarWindow class]]) {
+-    [(ToolbarWindow*)window windowMainStateChanged];
++  if ([window respondsToSelector:@selector(windowMainStateChanged)]) {
++    [(id)window windowMainStateChanged];
+   }
+ 
+   NS_OBJC_END_TRY_IGNORE_BLOCK;
+@@ -7844,8 +8010,8 @@ - (void)windowDidResignMain:(NSNotification*)aNotification {
+   }
+ 
+   NSWindow* window = [aNotification object];
+-  if ([window isKindOfClass:[ToolbarWindow class]]) {
+-    [(ToolbarWindow*)window windowMainStateChanged];
++  if ([window respondsToSelector:@selector(windowMainStateChanged)]) {
++    [(id)window windowMainStateChanged];
+   }
+ }
+ 
+@@ -7855,6 +8021,13 @@ - (void)windowDidBecomeKey:(NSNotification*)aNotification {
+   RollUpPopups();
+   ChildViewMouseTracker::ReEvaluateMouseEnterState();
+ 
++  // A non-activating standalone panel becomes key but not main. Paint its menu
++  // bar here so keyboard commands target the panel instead of the old window.
++  NSWindow* keyWindow = aNotification.object;
++  if (keyWindow && ZenWindowActsAsMain(keyWindow) && !NSApp._isRunningAppModal) {
++    [WindowDelegate paintMenubarForWindow:keyWindow];
++  }
++
+   if (!mGeckoWindow) {
+     return;
+   }
+@@ -7980,22 +8153,24 @@ - (CGFloat)FrameView__titlebarHeight;
+ @implementation NSView (FrameViewMethodSwizzling)
+ 
+ - (NSPoint)FrameView__closeButtonOrigin {
+-  if (![self.window isKindOfClass:[ToolbarWindow class]]) {
++  NSWindow* window = self.window;
++  if (![window respondsToSelector:@selector(windowButtonsRect)] ||
++      ![window respondsToSelector:@selector(drawsContentsIntoWindowFrame)]) {
+     return self.FrameView__closeButtonOrigin;
+   }
+-  auto* win = static_cast<ToolbarWindow*>(self.window);
+-  if (win.drawsContentsIntoWindowFrame &&
+-      !(win.styleMask & NSWindowStyleMaskFullScreen) &&
+-      (win.styleMask & NSWindowStyleMaskTitled)) {
+-    const NSRect buttonsRect = win.windowButtonsRect;
++  id win = window;
++  if ([win drawsContentsIntoWindowFrame] &&
++      !([win styleMask] & NSWindowStyleMaskFullScreen) &&
++      ([win styleMask] & NSWindowStyleMaskTitled)) {
++    const NSRect buttonsRect = [win windowButtonsRect];
+     if (NSIsEmptyRect(buttonsRect)) {
+       // Empty rect. Let's hide the buttons.
+       // Position is in non-flipped window coordinates. Using frame's height
+       // for the vertical coordinate will move the buttons above the window,
+       // making them invisible.
+-      return NSMakePoint(buttonsRect.origin.x, win.frame.size.height);
++      return NSMakePoint(buttonsRect.origin.x, [win frame].size.height);
+     }
+-    if (win.windowTitlebarLayoutDirection ==
++    if ([win windowTitlebarLayoutDirection] ==
+         NSUserInterfaceLayoutDirectionRightToLeft) {
+       // We're in RTL mode, which means that the close button is the rightmost
+       // button of the three window buttons. and buttonsRect.origin is the
+@@ -8012,18 +8187,21 @@ - (NSPoint)FrameView__closeButtonOrigin {
+ - (CGFloat)FrameView__titlebarHeight {
+   // XXX: Shouldn't this be [super FrameView__titlebarHeight]?
+   CGFloat height = [self FrameView__titlebarHeight];
+-  if ([self.window isKindOfClass:[ToolbarWindow class]]) {
++  NSWindow* window = self.window;
++  if ([window respondsToSelector:@selector(windowButtonsRect)] &&
++      [window respondsToSelector:@selector(drawsContentsIntoWindowFrame)]) {
+     // Make sure that the titlebar height includes our shifted buttons.
+     // The following coordinates are in window space, with the origin being at
+     // the bottom left corner of the window.
+-    auto* win = static_cast<ToolbarWindow*>(self.window);
++    id win = window;
+     CGFloat frameHeight = self.frame.size.height;
+     CGFloat windowButtonY = frameHeight;
+-    if (!NSIsEmptyRect(win.windowButtonsRect) &&
+-        win.drawsContentsIntoWindowFrame &&
+-        !(win.styleMask & NSWindowStyleMaskFullScreen) &&
+-        (win.styleMask & NSWindowStyleMaskTitled)) {
+-      windowButtonY = win.windowButtonsRect.origin.y;
++    NSRect windowButtonsRect = [win windowButtonsRect];
++    if (!NSIsEmptyRect(windowButtonsRect) &&
++        [win drawsContentsIntoWindowFrame] &&
++        !([win styleMask] & NSWindowStyleMaskFullScreen) &&
++        ([win styleMask] & NSWindowStyleMaskTitled)) {
++      windowButtonY = windowButtonsRect.origin.y;
+     }
+     height = std::max(height, frameHeight - windowButtonY);
+   }
+@@ -8043,6 +8221,8 @@ - (void)cursorUpdated:(NSEvent*)aEvent;
+ - (void)reflowTitlebarElements;
+ @end
+ 
++void ZenEnsureFrameViewClassIsSwizzled(Class frameViewClass);
++
+ @implementation BaseWindow
+ 
+ // The frame of a window is implemented using undocumented NSView subclasses.
+@@ -8054,10 +8234,15 @@ @implementation BaseWindow
+ + (Class)frameViewClassForStyleMask:(NSUInteger)styleMask {
+   Class frameViewClass = [super frameViewClassForStyleMask:styleMask];
+ 
++  ZenEnsureFrameViewClassIsSwizzled(frameViewClass);
++  return frameViewClass;
++}
++
++void ZenEnsureFrameViewClassIsSwizzled(Class frameViewClass) {
+   if (!gSwizzledFrameViewClasses) {
+     gSwizzledFrameViewClasses = [[NSMutableSet setWithCapacity:3] retain];
+     if (!gSwizzledFrameViewClasses) {
+-      return frameViewClass;
++      return;
+     }
+   }
+ 
+@@ -8091,8 +8276,6 @@ + (Class)frameViewClassForStyleMask:(NSUInteger)styleMask {
+ 
+     [gSwizzledFrameViewClasses addObject:frameViewClass];
+   }
+-
+-  return frameViewClass;
+ }
+ 
+ - (id)initWithContentRect:(NSRect)aContentRect
+@@ -9024,6 +9207,15 @@ - (void)showPopoverRelativeToRect:(NSRect)positioningRect
+     return;
+   }
+ 
++  if (!positioningRect.size.width && !positioningRect.size.height &&
++      mLastPopoverRect.size.width && mLastPopoverRect.size.height) {
++    // Sometimes, specially when downloading addons from unofficial sources,
++    // the popover is shown in a very fast motion and the positioningRect is
++    // empty.
++    positioningRect = mLastPopoverRect;
++  }
++  mLastPopoverRect = positioningRect;
++
+   // Close existing popover if it's already shown
+   if (mPopover.shown) {
+     [mPopover close];

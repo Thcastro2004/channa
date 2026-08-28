@@ -1,0 +1,15 @@
+diff --git a/browser/components/DesktopActorRegistry.sys.mjs b/browser/components/DesktopActorRegistry.sys.mjs
+--- a/browser/components/DesktopActorRegistry.sys.mjs
++++ b/browser/components/DesktopActorRegistry.sys.mjs
+@@ -903,7 +903,10 @@ export const JSWINDOWACTORS = {
+       esModuleURI: "resource:///actors/UrlbarChild.sys.mjs",
+     },
+     includeChrome: true,
+-    matches: ["chrome://browser/content/browser.xhtml"],
++    matches: [
++      "chrome://browser/content/browser.xhtml",
++      "chrome://browser/content/zen-global-search-panel.xhtml",
++    ],
+     remoteTypes: ["parent"],
+   },
+

@@ -1,0 +1,39 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+- name: zen.standalone-window.enabled
+  value: false
+
+# Stable DOM KeyboardEvent-code serialization consumed by the native macOS
+# hotkey bridge. The activation switch remains the preference above.
+- name: zen.standalone-window.global-search-shortcut
+  value: "meta,alt|KeyT"
+
+# Size of a newly opened standalone window. Not surfaced in the settings UI;
+# these exist so the default can be tuned without a rebuild.
+- name: zen.standalone-window.default-width
+  value: 1280
+
+- name: zen.standalone-window.default-height
+  value: 820
+
+# Last normal (non-maximized/non-fullscreen) standalone window geometry. These
+# are separate from the browser window's XUL/session geometry so standalone
+# windows never change where a normal Zen window opens.
+- name: zen.standalone-window.last-width
+  value: 0
+
+- name: zen.standalone-window.last-height
+  value: 0
+
+- name: zen.standalone-window.last-screen-x
+  value: 0
+
+- name: zen.standalone-window.last-screen-y
+  value: 0
+
+# When Zen was brought to the front only to show a standalone window, closing
+# that window sends the user back to the application the link came from.
+- name: zen.standalone-window.return-focus-on-close
+  value: true
