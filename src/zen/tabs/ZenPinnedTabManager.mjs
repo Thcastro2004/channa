@@ -849,7 +849,7 @@ class nsZenPinnedTabManager extends nsZenDOMOperatedFeature {
         if (essentialTabsTarget) {
           if (gZenWorkspaces.containerSpecificEssentials) {
             const targetContainerId =
-              gZenWorkspaces.getActiveWorkspaceFromCache().containerTabId || 0;
+              gZenWorkspaces.getActiveWorkspaceFromCache()?.containerTabId || 0;
             const sameContextId =
               (tab.getAttribute("usercontextid") || 0) == targetContainerId;
             if (!sameContextId && tab.hasAttribute("zen-essential")) {
@@ -1032,10 +1032,11 @@ class nsZenPinnedTabManager extends nsZenDOMOperatedFeature {
 
   canEssentialBeAdded(tab) {
     const isExistingEssentialTab = tab.hasAttribute("zen-essential");
+    const activeWorkspace = gZenWorkspaces.getActiveWorkspaceFromCache();
     return (
       !(
         (tab.getAttribute("usercontextid") || 0) !=
-          (gZenWorkspaces.getActiveWorkspaceFromCache().containerTabId || 0) &&
+          (activeWorkspace?.containerTabId || 0) &&
         gZenWorkspaces.containerSpecificEssentials
       ) &&
       (isExistingEssentialTab ||

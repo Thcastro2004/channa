@@ -8,8 +8,10 @@
   "type": "module",
   "scripts": {
     "build": "surfer build",
+    "build:incremental": "cd engine && python3 ./mach build binaries && python3 ./mach build faster",
     "build:ui": "surfer build --ui",
-    "start": "cd engine && python3 ./mach run --noprofile",
+    "start": "cd engine && repo_root=\"$(cd .. && pwd)\" && python3 ./mach run --noprofile --setpref \"security.sandbox.content.mac.testing_read_path1=$repo_root/src\"",
+    "start:temp": "cd engine && repo_root=\"$(cd .. && pwd)\" && python3 ./mach run --temp-profile --setpref \"security.sandbox.content.mac.testing_read_path1=$repo_root/src\" --setpref \"zen.standalone-window.enabled=true\" --no-remote",
     "start:bloat": "XPCOM_MEM_BLOAT_LOG=1 npm start",
     "import": "npm run ffprefs && npm run import:dumps && surfer import",
     "import:dumps": "python3 scripts/update_service_dumps.py",

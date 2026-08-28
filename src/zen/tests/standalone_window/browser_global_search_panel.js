@@ -242,7 +242,7 @@ add_task(async function test_internal_command_opens_and_cancels_real_panel() {
   );
   Assert.equal(
     toolboxStyle.borderRadius,
-    "16px",
+    panel.getComputedStyle(panel.gURLBar).borderRadius,
     "The outer browser chrome is clipped to the same rounded corners"
   );
   Assert.equal(

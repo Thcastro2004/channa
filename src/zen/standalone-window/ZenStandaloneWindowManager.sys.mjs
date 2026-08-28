@@ -604,6 +604,17 @@ export class nsZenStandaloneWindowManager {
           if (startupWindow && !startupWindow.closed) {
             startupWindow._zenDeferredStartupWindow = true;
             this.#deferredStartupWindow = startupWindow;
+            // The marker belongs only to the short cold-start race. Once the
+            // normal window has completed startup it is user-owned and must
+            // never be considered disposable by a later external link.
+            this.#promiseDelayedStartup(startupWindow)
+              .then(() => {
+                if (this.#deferredStartupWindow === startupWindow) {
+                  this.#deferredStartupWindow = null;
+                }
+                delete startupWindow._zenDeferredStartupWindow;
+              })
+              .catch(console.error);
           }
         }
       } catch (error) {
@@ -657,6 +668,11 @@ export class nsZenStandaloneWindowManager {
     // cold launch has no normal window yet. It is already the desired window;
     // closing it here would destroy the link we just delivered.
     if (createdWindows.includes(startupWindow)) {
+      return;
+    }
+    const tabs = startupWindow.gBrowser?.tabs;
+    if (!(tabs?.length === 1 && tabs[0].hasAttribute("zen-empty-tab"))) {
+      delete startupWindow._zenDeferredStartupWindow;
       return;
     }
     startupWindow.skipNextCanClose = true;
@@ -753,6 +769,11 @@ export class nsZenStandaloneWindowManager {
       if (win._zenDeferredStartupWindow) {
         Services.tm.dispatchToMainThread(() => {
           if (win.closed) {
+            return;
+          }
+          const tabs = win.gBrowser?.tabs;
+          if (!(tabs?.length === 1 && tabs[0].hasAttribute("zen-empty-tab"))) {
+            delete win._zenDeferredStartupWindow;
             return;
           }
           win.skipNextCanClose = true;
@@ -1299,6 +1320,25 @@ export class nsZenStandaloneWindowManager {
     if (standaloneWindow.closed || !this.isStandaloneWindow(standaloneWindow)) {
       this.#resolveStandaloneWindowReady(standaloneWindow);
       return;
+    }
+
+    if (AppConstants.platform === "macosx") {
+      const baseWindow = standaloneWindow.docShell.treeOwner.QueryInterface(
+        Ci.nsIBaseWindow
+      );
+      if (!Services.zen.isStandalonePanel(baseWindow)) {
+        const state = standaloneWindow.ZenExternalLinkStandalone;
+        if (state) {
+          state.isKeeping = true;
+          state.isClosing = true;
+        }
+        standaloneWindow.skipNextCanClose = true;
+        standaloneWindow.close();
+        this.#resolveStandaloneWindowReady(standaloneWindow);
+        throw new Error(
+          "Refusing to initialize a standalone window without its native panel"
+        );
+      }
     }
 
     this.markStandaloneDocument(standaloneWindow);

@@ -1,0 +1,12 @@
+diff --git a/toolkit/components/satchel/FormHistoryParent.sys.mjs b/toolkit/components/satchel/FormHistoryParent.sys.mjs
+index 3378228a50..0331116336 100644
+--- a/toolkit/components/satchel/FormHistoryParent.sys.mjs
++++ b/toolkit/components/satchel/FormHistoryParent.sys.mjs
+@@ -56,7 +56,7 @@ export class FormHistoryParent extends JSWindowActorParent {
+       }));
+ 
+-    if (changes.length) {
++    if (changes.length && lazy.FormHistory.enabled) {
+       lazy.FormHistory.update(changes);
+     }
+   }

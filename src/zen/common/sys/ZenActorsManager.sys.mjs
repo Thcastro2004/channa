@@ -37,10 +37,10 @@ let JSWINDOWACTORS = {
   },
   ZenGlance: {
     parent: {
-      esModuleURI: "resource:///actors/ZenGlanceParent.sys.mjs",
+      esModuleURI: "moz-src:///zen/glance/actors/ZenGlanceParent.sys.mjs",
     },
     child: {
-      esModuleURI: "resource:///actors/ZenGlanceChild.sys.mjs",
+      esModuleURI: "moz-src:///zen/glance/actors/ZenGlanceChild.sys.mjs",
       events: {
         DOMContentLoaded: {},
         mousedown: {
@@ -82,10 +82,10 @@ let JSWINDOWACTORS = {
 if (!Services.appinfo.inSafeMode) {
   JSWINDOWACTORS.ZenBoosts = {
     parent: {
-      esModuleURI: "resource:///actors/ZenBoostsParent.sys.mjs",
+      esModuleURI: "moz-src:///zen/boosts/actors/ZenBoostsParent.sys.mjs",
     },
     child: {
-      esModuleURI: "resource:///actors/ZenBoostsChild.sys.mjs",
+      esModuleURI: "moz-src:///zen/boosts/actors/ZenBoostsChild.sys.mjs",
       events: {
         // Needed to let the actor be created, please don't remove
         // without checking if boosts still work without it, thanks <3

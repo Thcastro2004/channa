@@ -172,7 +172,7 @@ index 39b5babee5942427a82a7a64ad69e1b16efebcc1..32beac13dd4215a16de3a783db6c32da
        if (
          aIconURL &&
          !LOCAL_PROTOCOLS.some(protocol => aIconURL.startsWith(protocol))
-@@ -1439,6 +1518,9 @@
+@@ -1439,4 +1518,7 @@
          );
          return;
        }
@@ -180,8 +180,12 @@ index 39b5babee5942427a82a7a64ad69e1b16efebcc1..32beac13dd4215a16de3a783db6c32da
 +        console.warn(e);
 +      }
  
-       let browser = this.getBrowserForTab(aTab);
-       browser.mIconURL = aIconURL;
+@@ -1514,4 +1596,4 @@
+     getIcon(aTab) {
+       let browser = aTab ? this.getBrowserForTab(aTab) : this.selectedBrowser;
+-      return browser.mIconURL;
++      return browser?.mIconURL ?? null;
+     }
 @@ -1761,7 +1843,6 @@
  
        // Preview mode should not reset the owner
@@ -701,12 +705,21 @@ index 39b5babee5942427a82a7a64ad69e1b16efebcc1..32beac13dd4215a16de3a783db6c32da
            return false;
          }
        }
-@@ -5917,7 +6114,7 @@
-           closeWindowWithLastTab != null
+@@ -5921,10 +6118,15 @@
+       var newTab = false;
+       if (this.#isLastTabInWindow(aTab)) {
+         closeWindow =
+-          closeWindowWithLastTab != null
++          window._zenStandaloneWindow ||
++          (closeWindowWithLastTab != null
              ? closeWindowWithLastTab
              : !window.toolbar.visible ||
 -              Services.prefs.getBoolPref("browser.tabs.closeWindowWithLastTab");
-+              Services.prefs.getBoolPref("browser.tabs.closeWindowWithLastTab") && !gZenWorkspaces._isClosingWindow && !gZenWorkspaces._removedByStartupPage;
++              (Services.prefs.getBoolPref(
++                "browser.tabs.closeWindowWithLastTab"
++              ) &&
++                !gZenWorkspaces._isClosingWindow &&
++                !gZenWorkspaces._removedByStartupPage));
  
          if (closeWindow) {
            // We've already called beforeunload on all the relevant tabs if we get here,

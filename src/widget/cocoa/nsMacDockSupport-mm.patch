@@ -1,18 +1,19 @@
 diff --git a/widget/cocoa/nsMacDockSupport.mm b/widget/cocoa/nsMacDockSupport.mm
-index 7f07ace0cdf81dea386ed3f36b020dbda23bfcd0..b34b66ceea47dd664ca05a72cb63fa669a8707f0 100644
+index 889997a24f..1a4371d978 100644
 --- a/widget/cocoa/nsMacDockSupport.mm
 +++ b/widget/cocoa/nsMacDockSupport.mm
-@@ -18,6 +18,9 @@
- #include "mozilla/SVGImageContext.h"
- #include "nsISVGPaintContext.h"
- #include "nsIFile.h"
+@@ -6,6 +6,10 @@
+ #include <CoreFoundation/CoreFoundation.h>
+ #include <signal.h>
+ 
++#include "mozilla/Preferences.h"
 +#include "nsIBaseWindow.h"
 +#include "nsIWidget.h"
-+#include "mozilla/Preferences.h"
- 
- NS_IMPL_ISUPPORTS(nsMacDockSupport, nsIMacDockSupport, nsITaskbarProgress)
- 
-@@ -75,13 +78,125 @@ NS_IMPL_ISUPPORTS(nsMacDockSupport, nsIMacDockSupport, nsITaskbarProgress)
++
+ #include "MOZIconHelper.h"
+ #include "imgLoader.h"
+ #include "mozilla/MacStringHelpers.h"
+@@ -75,13 +79,125 @@ - (void)drawRect:(NSRect)aRect {
  
  @end
  
@@ -139,7 +140,7 @@ index 7f07ace0cdf81dea386ed3f36b020dbda23bfcd0..b34b66ceea47dd664ca05a72cb63fa66
  
  nsMacDockSupport::~nsMacDockSupport() {
    if (mDockTileWrapperView) {
-@@ -111,12 +226,165 @@ nsMacDockSupport::SetDockMenu(nsIStandaloneNativeMenu* aDockMenu) {
+@@ -111,12 +227,165 @@ - (void)drawRect:(NSRect)aRect {
    return NS_OK;
  }
  
