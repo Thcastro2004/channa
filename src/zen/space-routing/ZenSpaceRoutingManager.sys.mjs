@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+import { AppConstants } from "resource://gre/modules/AppConstants.sys.mjs";
 import { JSONFile } from "resource://gre/modules/JSONFile.sys.mjs";
 
 const lazy = {};
@@ -139,6 +140,7 @@ class nsZenSpaceRoutingManager {
       !!options?.fromExternal &&
       !!win &&
       !win._zenStandaloneWindow &&
+      AppConstants.platform === "macosx" &&
       Services.prefs.getBoolPref("zen.standalone-window.enabled", false)
     );
   }

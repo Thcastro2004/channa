@@ -4,40 +4,51 @@
 
 - name: zen.standalone-window.enabled
   value: false
+  condition: "defined(XP_MACOSX)"
 
 # global search default command
 - name: zen.standalone-window.global-search-shortcut
   value: "meta,alt|KeyT"
+  condition: "defined(XP_MACOSX)"
 
 # default size
 - name: zen.standalone-window.default-width
   value: 1280
+  condition: "defined(XP_MACOSX)"
 
 - name: zen.standalone-window.default-height
   value: 820
+  condition: "defined(XP_MACOSX)"
 
 # Persistent window values. 0 means unset.
 - name: zen.standalone-window.last-width
   value: 0
+  condition: "defined(XP_MACOSX)"
 
 - name: zen.standalone-window.last-height
   value: 0
+  condition: "defined(XP_MACOSX)"
 
 - name: zen.standalone-window.last-screen-x
   value: 0
+  condition: "defined(XP_MACOSX)"
 
 - name: zen.standalone-window.last-screen-y
   value: 0
+  condition: "defined(XP_MACOSX)"
 
 # behavior variables
 # return focus to the previous app on standalone close
 - name: zen.standalone-window.return-focus-on-close
   value: true
+  condition: "defined(XP_MACOSX)"
 
 # zen stays inactive when standalone is open
 - name: zen.standalone-window.launch-stays-in-background
   value: true
+  condition: "defined(XP_MACOSX)"
 
 # delays startup sequence to open only the standalone (in ms)
 - name: zen.standalone-window.startup-link-grace-ms
   value: 500
+  condition: "defined(XP_MACOSX)"

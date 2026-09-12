@@ -75,8 +75,12 @@ export class nsZenStandaloneWindowManager {
     };
   }
 
-  /** @returns {Window} The newly constructed browser window. */
+  /** @returns {Window|null} The newly constructed browser window. */
   constructStandaloneWindow(request) {
+    if (AppConstants.platform !== "macosx") {
+      return null;
+    }
+
     const args = Cc["@mozilla.org/supports-string;1"].createInstance(
       Ci.nsISupportsString,
     );
@@ -296,7 +300,10 @@ export class nsZenStandaloneWindowManager {
   }
 
   #isEnabled() {
-    return Services.prefs.getBoolPref("zen.standalone-window.enabled", false);
+    return (
+      AppConstants.platform === "macosx" &&
+      Services.prefs.getBoolPref("zen.standalone-window.enabled", false)
+    );
   }
 
   #openRequest(request) {
