@@ -4,6 +4,13 @@
 
 import { JSONFile } from "resource://gre/modules/JSONFile.sys.mjs";
 
+const lazy = {};
+
+ChromeUtils.defineESModuleGetters(lazy, {
+  gZenStandaloneWindowManager:
+    "resource:///modules/zen/standalonewindow/ZenStandaloneWindowManager.sys.mjs",
+});
+
 class nsZenSpaceRoutingManager {
   #file = null;
   #saveFilename = "zen-space-routing.jsonlz4";
@@ -80,47 +87,68 @@ class nsZenSpaceRoutingManager {
    * @returns {object} Returns an object with { shouldEarlyExit, userContextId, isRouteFound, targetRoute, targetWorkspaceName }
    */
   onBeforeAddTab(uriString, options, win) {
-    let userContextId = null;
-    let isRouteFound = false;
-    let targetRoute = null;
-    let targetWorkspaceName = null;
+    const result = {
+      shouldEarlyExit: false,
+      userContextId: null,
+      isRouteFound: false,
+      targetRoute: null,
+      targetWorkspaceName: null,
+    };
 
-    if (
-      this.#shouldSkipProcessing(options, win) !=
-      nsZenSpaceRoutingManager.SKIP_TYPE.NONE
-    ) {
-      return {
-        shouldEarlyExit: false,
-        userContextId,
-        isRouteFound,
-        targetRoute,
-        targetWorkspaceName,
-      };
+    const skipType = this.#shouldSkipProcessing(options, win);
+
+    if (skipType == nsZenSpaceRoutingManager.SKIP_TYPE.SKIPPED_TAB) {
+      return result;
     }
 
-    targetRoute = this.routeUri(uriString, options);
-    switch (targetRoute) {
+    if (
+      this.shouldOpenExternalLinkInStandaloneWindow(uriString, options, win) &&
+      this.openExternalLinkInStandaloneWindow(uriString, options, win)
+    ) {
+      result.shouldEarlyExit = true;
+      return result;
+    }
+
+    if (skipType != nsZenSpaceRoutingManager.SKIP_TYPE.NONE) {
+      return result;
+    }
+
+    result.targetRoute = this.routeUri(uriString, options);
+    switch (result.targetRoute) {
       case "most-recent-space":
         break;
       default: {
         const targetWorkspace =
-          win.gZenWorkspaces.getWorkspaceFromId(targetRoute);
+          win.gZenWorkspaces.getWorkspaceFromId(result.targetRoute);
 
         if (targetWorkspace) {
-          userContextId = targetWorkspace.containerTabId;
-          isRouteFound = true;
-          targetWorkspaceName = targetWorkspace.name;
+          result.userContextId = targetWorkspace.containerTabId;
+          result.isRouteFound = true;
+          result.targetWorkspaceName = targetWorkspace.name;
         }
       }
     }
 
-    return {
-      shouldEarlyExit: false,
-      userContextId,
-      isRouteFound,
-      targetRoute,
-      targetWorkspaceName,
-    };
+    return result;
+  }
+
+  shouldOpenExternalLinkInStandaloneWindow(uriString, options, win) {
+    return (
+      typeof uriString === "string" &&
+      !!uriString &&
+      !!options?.fromExternal &&
+      !!win &&
+      !win._zenStandaloneWindow &&
+      Services.prefs.getBoolPref("zen.standalone-window.enabled", false)
+    );
+  }
+
+  openExternalLinkInStandaloneWindow(uriString, options, openerWindow) {
+    return lazy.gZenStandaloneWindowManager.openExternalLinkStandaloneWindow({
+      uriString,
+      options,
+      openerWindow,
+    });
   }
 
   /**

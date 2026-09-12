@@ -2,6 +2,15 @@ diff --git a/browser/components/BrowserContentHandler.sys.mjs b/browser/componen
 index 4bfb4199dafac004486dfc61db954173742a010a..542c156432b9d7c2190c0d14ce9cfd09814422bf 100644
 --- a/browser/components/BrowserContentHandler.sys.mjs
 +++ b/browser/components/BrowserContentHandler.sys.mjs
+@@ -14,6 +14,8 @@ ChromeUtils.defineESModuleGetters(lazy, {
+   AsyncShutdown: "resource://gre/modules/AsyncShutdown.sys.mjs",
+   BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.sys.mjs",
+   BrowserUtils: "resource://gre/modules/BrowserUtils.sys.mjs",
++  gZenStandaloneWindowManager:
++    "resource:///modules/zen/standalonewindow/ZenStandaloneWindowManager.sys.mjs",
+   FirstStartup: "resource://gre/modules/FirstStartup.sys.mjs",
+   HeadlessShell: "moz-src:///browser/components/shell/HeadlessShell.sys.mjs",
+   HomePage: "resource:///modules/HomePage.sys.mjs",
 @@ -603,6 +603,28 @@ nsBrowserContentHandler.prototype = {
        }
      }
@@ -38,4 +47,80 @@ index 4bfb4199dafac004486dfc61db954173742a010a..542c156432b9d7c2190c0d14ce9cfd09
 +    info += "  --blank-window [<url>]  Open the new blank window.\n";
      if (AppConstants.platform == "win") {
        info += "  --preferences      Open Options dialog.\n";
+     } else {
+@@ -1317,5 +1319,29 @@ function handURIToExistingBrowser(
+   let navWin = lazy.BrowserWindowTracker.getTopWindow({
+     private: allowPrivate,
+   });
++
++  // Route before touching navWin so it is not raised with the standalone.
++  let standaloneOpener = navWin;
++  if (!standaloneOpener && !forcePrivate) {
++    standaloneOpener = lazy.BrowserWindowTracker.getTopWindow({
++      private: true,
++    });
++  }
++  if (
++    !forcePrivate &&
++    lazy.gZenStandaloneWindowManager.openExternalLinksInStandaloneWindows(
++      [uri.spec],
++      standaloneOpener,
++      {
++        fromExternal: true,
++        triggeringPrincipal,
++        userContextId:
++          standaloneOpener?.gZenWorkspaces?.getCurrentSpaceContainerId?.() ??
++          0,
++      }
++    )
++  ) {
++    return;
++  }
+ 
+   if (navWin) {
+@@ -1740,6 +1764,24 @@ nsDefaultCommandLineHandler.prototype = {
+       // Can't open multiple URLs without using system principal.
+       var URLlist = urilist.filter(shouldLoadURI).map(u => u.spec);
+       if (URLlist.length) {
++        // A standalone can be the first browser window on cold start.
++        if (
++          lazy.gZenStandaloneWindowManager.openExternalLinksInStandaloneWindows(
++            URLlist,
++            null,
++            {
++              isApplicationLaunch:
++                cmdLine.state == Ci.nsICommandLine.STATE_INITIAL_LAUNCH,
++            }
++          )
++        ) {
++          let blankWindow = Services.wm.getMostRecentWindow("navigator:blank");
++          if (blankWindow) {
++            blankWindow.close();
++          }
++          cmdLine.preventDefault = true;
++          return;
++        }
+         openBrowserWindow(cmdLine, lazy.gSystemPrincipal, URLlist);
+       }
+     } else if (!cmdLine.preventDefault) {
+@@ -1757,5 +1798,20 @@ nsDefaultCommandLineHandler.prototype = {
+           return;
+         }
+       }
++      if (
++        lazy.gZenStandaloneWindowManager.shouldSuppressEmptyStartupWindow()
++      ) {
++        cmdLine.preventDefault = true;
++        return;
++      }
++      if (
++        cmdLine.state == Ci.nsICommandLine.STATE_INITIAL_LAUNCH &&
++        lazy.gZenStandaloneWindowManager.deferStartupWindowForExternalLink(() =>
++          openBrowserWindow(cmdLine, lazy.gSystemPrincipal)
++        )
++      ) {
++        cmdLine.preventDefault = true;
++        return;
++      }
+       openBrowserWindow(cmdLine, lazy.gSystemPrincipal);
      } else {

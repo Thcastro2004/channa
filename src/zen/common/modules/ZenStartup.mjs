@@ -17,6 +17,12 @@ class ZenStartup {
   });
 
   init() {
+    if (window._zenStandaloneWindow) {
+      // Mark the window before first paint.
+      document.documentElement.setAttribute("zen-standalone-window", "true");
+      // Use separate window geometry.
+      document.documentElement.removeAttribute("persist");
+    }
     this.openWatermark();
     this.#zenInitBrowserLayout();
   }

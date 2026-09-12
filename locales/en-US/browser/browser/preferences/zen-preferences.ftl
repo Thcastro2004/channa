@@ -108,6 +108,11 @@ zen-settings-workspaces-enabled =
 zen-settings-workspaces-hide-default-container-indicator =
     .label = Hide the default container indicator in the tab bar
 
+zen-standalone-window-header = Standalone windows
+zen-standalone-window-description = Open external links in lightweight standalone windows and summon Zen search from anywhere on macOS.
+zen-standalone-window-enabled =
+    .label = Enable standalone windows and global search
+
 zen-key-unsaved = Unsaved shortcut! Please save it by clicking the "Escape" key after retyping it.
 zen-key-conflict = Conflicts with { $group } -> { $shortcut }
 

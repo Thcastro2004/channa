@@ -1175,6 +1175,16 @@ Preferences.addAll([
     default: true,
   },
   {
+    id: "zen.standalone-window.enabled",
+    type: "bool",
+    default: false,
+  },
+  {
+    id: "zen.standalone-window.global-search-shortcut",
+    type: "string",
+    default: "meta,alt|KeyT",
+  },
+  {
     id: "zen.glance.activation-method",
     type: "string",
     default: "ctrl",

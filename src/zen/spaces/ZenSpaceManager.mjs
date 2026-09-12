@@ -84,6 +84,7 @@ class nsZenWorkspaces {
     this._workspaceChangeInProgress = false;
 
     if (!this.shouldHaveWorkspaces) {
+      this._resolvePinnedInitialized();
       this._resolveInitialized();
       console.warn(
         "gZenWorkspaces: !!! gZenWorkspaces is disabled in hidden windows !!!"
@@ -264,6 +265,9 @@ class nsZenWorkspaces {
   }
 
   #initializeEmptyTab() {
+    if (window._zenStandaloneWindow) {
+      return;
+    }
     for (const tab of gBrowser.tabs) {
       // Check if session store has an empty tab
       if (tab.hasAttribute("zen-empty-tab") && !tab.pinned) {
@@ -629,6 +633,9 @@ class nsZenWorkspaces {
   }
 
   get shouldHaveWorkspaces() {
+    if (window._zenStandaloneWindow) {
+      return false;
+    }
     if (typeof this._shouldHaveWorkspaces === "undefined") {
       let chromeFlags = window.docShell.treeOwner
         .QueryInterface(Ci.nsIInterfaceRequestor)
@@ -1618,7 +1625,7 @@ class nsZenWorkspaces {
   }
 
   async changeWorkspace(workspace, ...args) {
-    if (!this.workspaceEnabled) {
+    if (!this.workspaceEnabled || window._zenStandaloneWindow) {
       return workspace;
     }
     this.#currentSpaceSwitchContext.animations.forEach(animation => {

@@ -1,0 +1,43 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+- name: zen.standalone-window.enabled
+  value: false
+
+# global search default command
+- name: zen.standalone-window.global-search-shortcut
+  value: "meta,alt|KeyT"
+
+# default size
+- name: zen.standalone-window.default-width
+  value: 1280
+
+- name: zen.standalone-window.default-height
+  value: 820
+
+# Persistent window values. 0 means unset.
+- name: zen.standalone-window.last-width
+  value: 0
+
+- name: zen.standalone-window.last-height
+  value: 0
+
+- name: zen.standalone-window.last-screen-x
+  value: 0
+
+- name: zen.standalone-window.last-screen-y
+  value: 0
+
+# behavior variables
+# return focus to the previous app on standalone close
+- name: zen.standalone-window.return-focus-on-close
+  value: true
+
+# zen stays inactive when standalone is open
+- name: zen.standalone-window.launch-stays-in-background
+  value: true
+
+# delays startup sequence to open only the standalone (in ms)
+- name: zen.standalone-window.startup-link-grace-ms
+  value: 500
