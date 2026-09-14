@@ -5,10 +5,12 @@
 #include "nsISupports.idl"
 #include "nsIURI.idl"
 
+interface nsIBaseWindow;
+
 /**
  * @brief Common utility functions for Zen.
  */
-[scriptable, uuid(d034642a-43b1-4814-be1c-8ad75e337c84)]
+[scriptable, uuid(49cde8bf-43f5-4d62-bb65-5abd61c15971)]
 interface nsIZenCommonUtils : nsISupports {
   /*
    * @brief Share using the native share dialog.
@@ -32,4 +34,12 @@ interface nsIZenCommonUtils : nsISupports {
    * @brief Play a single haptic feedback note if supported.
    */
   void playHapticFeedback();
+
+  /**
+   * Make the next top-level Cocoa window use the standalone panel class.
+   * Preparation is consumed by exactly one native window creation.
+   */
+  void prepareStandalonePanel();
+  void cancelPreparedStandalonePanel();
+  boolean isStandalonePanel(in nsIBaseWindow window);
 };

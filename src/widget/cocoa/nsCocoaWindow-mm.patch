@@ -1,5 +1,5 @@
 diff --git a/widget/cocoa/nsCocoaWindow.mm b/widget/cocoa/nsCocoaWindow.mm
-index 2efd02e4a92433fd29bbfdb707aa81cfec45031e..3b763c3927f07e529c826f8e4f62bc80a324b247 100644
+index 2efd02e4a92433fd29bbfdb707aa81cfec45031e..e73e80940d0c7b1c4c0ebb5ee71629b1e50dee81 100644
 --- a/widget/cocoa/nsCocoaWindow.mm
 +++ b/widget/cocoa/nsCocoaWindow.mm
 @@ -86,6 +86,7 @@
@@ -10,7 +10,55 @@ index 2efd02e4a92433fd29bbfdb707aa81cfec45031e..3b763c3927f07e529c826f8e4f62bc80
  #include "mozilla/WritingModes.h"
  #include "mozilla/dom/Document.h"
  #include "mozilla/layers/CompositorBridgeChild.h"
-@@ -1332,6 +1333,110 @@ - (NSRect)_opaqueRectForWindowMoveWhenInTitlebar {
+@@ -104,10 +105,33 @@
+ }  // namespace layers
+ }  // namespace mozilla
+ using namespace mozilla::layers;
++
++extern Class ZenConsumePreparedPanelClass();
++extern bool ZenWindowActsAsMain(NSWindow* aWindow);
++extern void ZenReleaseSuppressedLaunchActivation(bool aActivate);
++
+ using namespace mozilla::widget;
+ using namespace mozilla::gl;
+ using namespace mozilla;
+ 
++// ZenStandalonePanel owns its tracking area, but ChildViewMouseTracker owns
++// Gecko's process-wide mouse state and is not exported outside this file.
++void ZenWindowMouseEntered(NSEvent* aEvent) {
++  ChildViewMouseTracker::MouseEnteredWindow(aEvent);
++}
++
++void ZenWindowMouseExited(NSEvent* aEvent) {
++  ChildViewMouseTracker::MouseExitedWindow(aEvent);
++}
++
++void ZenWindowMouseMoved(NSEvent* aEvent) {
++  ChildViewMouseTracker::MouseMoved(aEvent);
++}
++
++void ZenWindowDestroyed(NSWindow* aWindow) {
++  ChildViewMouseTracker::OnDestroyWindow(aWindow);
++}
++
+ BOOL sTouchBarIsInitialized = NO;
+ 
+ // defined in nsMenuBarX.mm
+@@ -1217,11 +1241,11 @@ static LayoutDeviceIntRect FindFirstRectOfType(
+ 
+   UpdateVibrancy(aThemeGeometries);
+ 
+-  if (![mChildView.window isKindOfClass:[ToolbarWindow class]]) {
++  if (![mChildView.window respondsToSelector:@selector(placeWindowButtons:)]) {
+     return;
+   }
+ 
+-  ToolbarWindow* win = (ToolbarWindow*)[mChildView window];
++  id win = [mChildView window];
+ 
+   // Update titlebar control offsets.
+   LayoutDeviceIntRect windowButtonRect =
+@@ -1332,6 +1356,110 @@ - (NSRect)_opaqueRectForWindowMoveWhenInTitlebar {
  }
  @end
  
@@ -121,7 +169,20 @@ index 2efd02e4a92433fd29bbfdb707aa81cfec45031e..3b763c3927f07e529c826f8e4f62bc80
  void nsCocoaWindow::UpdateWindowDraggingRegion(
      const LayoutDeviceIntRegion& aRegion) {
    // mChildView returns YES from mouseDownCanMoveWindow, so we need to put
-@@ -4919,6 +5024,10 @@ - (BOOL)wantsBestResolutionOpenGLSurface {
+@@ -4843,7 +4971,11 @@ - (BOOL)wantsBestResolutionOpenGLSurface {
+       return YES;
+   }
+ 
+-  if (!topLevelWindow || ([topLevelWindow isMainWindow] && !aIsClickThrough) ||
++  // Standalone panels are auxiliary, but Gecko must treat them as active so
++  // their ChildView receives the first click and subsequent mouse movement.
++  if (!topLevelWindow ||
++      (([topLevelWindow isMainWindow] || ZenWindowActsAsMain(topLevelWindow)) &&
++       !aIsClickThrough) ||
+       [aEvent type] == NSEventTypeOtherMouseDown ||
+       (([aEvent modifierFlags] & NSEventModifierFlagCommand) != 0 &&
+        [aEvent type] != NSEventTypeMouseMoved))
+@@ -4919,6 +5051,10 @@ - (BOOL)wantsBestResolutionOpenGLSurface {
  nsCocoaWindow::~nsCocoaWindow() {
    NS_OBJC_BEGIN_TRY_IGNORE_BLOCK;
  
@@ -132,3 +193,158 @@ index 2efd02e4a92433fd29bbfdb707aa81cfec45031e..3b763c3927f07e529c826f8e4f62bc80
    RemoveAllChildren();
    if (mWindow && mWindowMadeHere) {
      CancelAllTransitions();
+@@ -5163,6 +5299,12 @@ static unsigned int WindowMaskForBorderStyle(BorderStyle aBorderStyle) {
+     windowClass = [BorderlessWindow class];
+   }
+ 
++  // Preparation is one-shot so no unrelated browser window can inherit the
++  // standalone panel class.
++  if (Class zenPanelClass = ZenConsumePreparedPanelClass()) {
++    windowClass = zenPanelClass;
++  }
++
+   // Create the window
+   mWindow = [[windowClass alloc] initWithContentRect:contentRect
+                                            styleMask:features
+@@ -5499,6 +5641,7 @@ static void SyncPopoverBounds(NSPopover* aPopover,
+     if (NSApp.activationPolicy != NSApplicationActivationPolicyRegular) {
+       NSApp.activationPolicy = NSApplicationActivationPolicyRegular;
+       PR_SetEnv("MOZ_APP_NO_DOCK=");
++      ZenReleaseSuppressedLaunchActivation(!ZenWindowActsAsMain(mWindow));
+     }
+ 
+     // Don't try to show a popup when the parent isn't visible or is minimized.
+@@ -7813,8 +7956,8 @@ - (void)windowDidBecomeMain:(NSNotification*)aNotification {
+     [WindowDelegate paintMenubarForWindow:window];
+   }
+ 
+-  if ([window isKindOfClass:[ToolbarWindow class]]) {
+-    [(ToolbarWindow*)window windowMainStateChanged];
++  if ([window respondsToSelector:@selector(windowMainStateChanged)]) {
++    [(id)window windowMainStateChanged];
+   }
+ 
+   NS_OBJC_END_TRY_IGNORE_BLOCK;
+@@ -7844,8 +7987,8 @@ - (void)windowDidResignMain:(NSNotification*)aNotification {
+   }
+ 
+   NSWindow* window = [aNotification object];
+-  if ([window isKindOfClass:[ToolbarWindow class]]) {
+-    [(ToolbarWindow*)window windowMainStateChanged];
++  if ([window respondsToSelector:@selector(windowMainStateChanged)]) {
++    [(id)window windowMainStateChanged];
+   }
+ }
+ 
+@@ -7855,6 +7998,14 @@ - (void)windowDidBecomeKey:(NSNotification*)aNotification {
+   RollUpPopups();
+   ChildViewMouseTracker::ReEvaluateMouseEnterState();
+ 
++  // A non-activating panel becomes key without becoming main. Paint its menu
++  // here so keyboard commands do not continue targeting the previous window.
++  NSWindow* keyWindow = aNotification.object;
++  if (keyWindow && ZenWindowActsAsMain(keyWindow) &&
++      !NSApp._isRunningAppModal) {
++    [WindowDelegate paintMenubarForWindow:keyWindow];
++  }
++
+   if (!mGeckoWindow) {
+     return;
+   }
+@@ -7980,22 +8131,24 @@ - (CGFloat)FrameView__titlebarHeight;
+ @implementation NSView (FrameViewMethodSwizzling)
+ 
+ - (NSPoint)FrameView__closeButtonOrigin {
+-  if (![self.window isKindOfClass:[ToolbarWindow class]]) {
++  NSWindow* window = self.window;
++  if (![window respondsToSelector:@selector(windowButtonsRect)] ||
++      ![window respondsToSelector:@selector(drawsContentsIntoWindowFrame)]) {
+     return self.FrameView__closeButtonOrigin;
+   }
+-  auto* win = static_cast<ToolbarWindow*>(self.window);
+-  if (win.drawsContentsIntoWindowFrame &&
+-      !(win.styleMask & NSWindowStyleMaskFullScreen) &&
+-      (win.styleMask & NSWindowStyleMaskTitled)) {
+-    const NSRect buttonsRect = win.windowButtonsRect;
++  id win = window;
++  if ([win drawsContentsIntoWindowFrame] &&
++      !([win styleMask] & NSWindowStyleMaskFullScreen) &&
++      ([win styleMask] & NSWindowStyleMaskTitled)) {
++    const NSRect buttonsRect = [win windowButtonsRect];
+     if (NSIsEmptyRect(buttonsRect)) {
+       // Empty rect. Let's hide the buttons.
+       // Position is in non-flipped window coordinates. Using frame's height
+       // for the vertical coordinate will move the buttons above the window,
+       // making them invisible.
+-      return NSMakePoint(buttonsRect.origin.x, win.frame.size.height);
++      return NSMakePoint(buttonsRect.origin.x, [win frame].size.height);
+     }
+-    if (win.windowTitlebarLayoutDirection ==
++    if ([win windowTitlebarLayoutDirection] ==
+         NSUserInterfaceLayoutDirectionRightToLeft) {
+       // We're in RTL mode, which means that the close button is the rightmost
+       // button of the three window buttons. and buttonsRect.origin is the
+@@ -8012,18 +8165,21 @@ - (NSPoint)FrameView__closeButtonOrigin {
+ - (CGFloat)FrameView__titlebarHeight {
+   // XXX: Shouldn't this be [super FrameView__titlebarHeight]?
+   CGFloat height = [self FrameView__titlebarHeight];
+-  if ([self.window isKindOfClass:[ToolbarWindow class]]) {
++  NSWindow* window = self.window;
++  if ([window respondsToSelector:@selector(windowButtonsRect)] &&
++      [window respondsToSelector:@selector(drawsContentsIntoWindowFrame)]) {
+     // Make sure that the titlebar height includes our shifted buttons.
+     // The following coordinates are in window space, with the origin being at
+     // the bottom left corner of the window.
+-    auto* win = static_cast<ToolbarWindow*>(self.window);
++    id win = window;
+     CGFloat frameHeight = self.frame.size.height;
+     CGFloat windowButtonY = frameHeight;
+-    if (!NSIsEmptyRect(win.windowButtonsRect) &&
+-        win.drawsContentsIntoWindowFrame &&
+-        !(win.styleMask & NSWindowStyleMaskFullScreen) &&
+-        (win.styleMask & NSWindowStyleMaskTitled)) {
+-      windowButtonY = win.windowButtonsRect.origin.y;
++    NSRect windowButtonsRect = [win windowButtonsRect];
++    if (!NSIsEmptyRect(windowButtonsRect) &&
++        [win drawsContentsIntoWindowFrame] &&
++        !([win styleMask] & NSWindowStyleMaskFullScreen) &&
++        ([win styleMask] & NSWindowStyleMaskTitled)) {
++      windowButtonY = windowButtonsRect.origin.y;
+     }
+     height = std::max(height, frameHeight - windowButtonY);
+   }
+@@ -8043,6 +8199,8 @@ - (void)cursorUpdated:(NSEvent*)aEvent;
+ - (void)reflowTitlebarElements;
+ @end
+ 
++void ZenEnsureFrameViewClassIsSwizzled(Class frameViewClass);
++
+ @implementation BaseWindow
+ 
+ // The frame of a window is implemented using undocumented NSView subclasses.
+@@ -8054,10 +8212,15 @@ @implementation BaseWindow
+ + (Class)frameViewClassForStyleMask:(NSUInteger)styleMask {
+   Class frameViewClass = [super frameViewClassForStyleMask:styleMask];
+ 
++  ZenEnsureFrameViewClassIsSwizzled(frameViewClass);
++  return frameViewClass;
++}
++
++void ZenEnsureFrameViewClassIsSwizzled(Class frameViewClass) {
+   if (!gSwizzledFrameViewClasses) {
+     gSwizzledFrameViewClasses = [[NSMutableSet setWithCapacity:3] retain];
+     if (!gSwizzledFrameViewClasses) {
+-      return frameViewClass;
++      return;
+     }
+   }
+ 
+@@ -8091,8 +8254,6 @@ + (Class)frameViewClassForStyleMask:(NSUInteger)styleMask {
+ 
+     [gSwizzledFrameViewClasses addObject:frameViewClass];
+   }
+-
+-  return frameViewClass;
+ }
+ 
+ - (id)initWithContentRect:(NSRect)aContentRect

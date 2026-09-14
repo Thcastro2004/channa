@@ -10,6 +10,7 @@
 #include "nsIWindowMediator.h"
 #include "nsServiceManagerUtils.h"
 #include "nsISharePicker.h"
+#include "nsIBaseWindow.h"
 
 #include "mozilla/StaticPrefs_zen.h"
 
@@ -67,6 +68,27 @@ ZenCommonUtils::PlayHapticFeedback() {
     return NS_OK;
   }
   return PlayHapticFeedbackInternal();
+}
+
+NS_IMETHODIMP
+ZenCommonUtils::PrepareStandalonePanel() {
+  PrepareStandalonePanelInternal();
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+ZenCommonUtils::CancelPreparedStandalonePanel() {
+  CancelPreparedStandalonePanelInternal();
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+ZenCommonUtils::IsStandalonePanel(nsIBaseWindow* aWindow, bool* aIsPanel) {
+  if (!aIsPanel) {
+    return NS_ERROR_INVALID_ARG;
+  }
+  *aIsPanel = IsStandalonePanelInternal(aWindow);
+  return NS_OK;
 }
 
 NS_IMETHODIMP

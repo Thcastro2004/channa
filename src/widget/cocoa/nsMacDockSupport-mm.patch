@@ -1,0 +1,253 @@
+diff --git a/widget/cocoa/nsMacDockSupport.mm b/widget/cocoa/nsMacDockSupport.mm
+index 889997a24fe65fbd45e28770d0fba6f1651c0c94..ed7ab4b5cf7ca515eb4def7cb847e5fed900a5c4 100644
+--- a/widget/cocoa/nsMacDockSupport.mm
++++ b/widget/cocoa/nsMacDockSupport.mm
+@@ -9,11 +9,14 @@
+ #include "MOZIconHelper.h"
+ #include "imgLoader.h"
+ #include "mozilla/MacStringHelpers.h"
++#include "mozilla/Preferences.h"
+ #include "mozilla/SVGImageContext.h"
++#include "nsIBaseWindow.h"
+ #include "nsCocoaUtils.h"
+ #include "nsComponentManagerUtils.h"
+ #include "nsIFile.h"
+ #include "nsISVGPaintContext.h"
++#include "nsIWidget.h"
+ #include "nsMacDockSupport.h"
+ #include "nsNativeThemeColors.h"
+ #include "nsObjCExceptions.h"
+@@ -21,6 +24,85 @@
+ 
+ NS_IMPL_ISUPPORTS(nsMacDockSupport, nsIMacDockSupport, nsITaskbarProgress)
+ 
++static NSTimeInterval sApplicationActivatedAt = -1.0;
++static id sApplicationActivationObserver = nil;
++static id sWorkspaceActivationObserver = nil;
++static NSRunningApplication* sPreviousApplication = nil;
++static bool sZenLaunchActivationSuppressed = false;
++static NSString* const kZenStandaloneWindowEnabledKey =
++    @"ZenStandaloneWindowEnabled";
++
++static void ZenMirrorStandaloneWindowPref(const char*, void*) {
++  [NSUserDefaults.standardUserDefaults
++      setBool:mozilla::Preferences::GetBool("zen.standalone-window.enabled",
++                                            false)
++       forKey:kZenStandaloneWindowEnabledKey];
++}
++
++// nsAppShell runs before profile preferences are available. The mirrored
++// default lets it make the launch-time activation decision synchronously.
++bool ZenSuppressLaunchActivation() {
++  if (![NSUserDefaults.standardUserDefaults
++          boolForKey:kZenStandaloneWindowEnabledKey]) {
++    return false;
++  }
++
++  [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
++  sZenLaunchActivationSuppressed = true;
++  return true;
++}
++
++void ZenReleaseSuppressedLaunchActivation(bool aActivate) {
++  if (!sZenLaunchActivationSuppressed) {
++    return;
++  }
++
++  sZenLaunchActivationSuppressed = false;
++  if (aActivate) {
++    [NSApp activateIgnoringOtherApps:YES];
++  }
++}
++
++static void RememberPreviousApplication(NSRunningApplication* aApplication) {
++  if (!aApplication ||
++      aApplication.processIdentifier ==
++          NSRunningApplication.currentApplication.processIdentifier) {
++    return;
++  }
++
++  [sPreviousApplication release];
++  sPreviousApplication = [aApplication retain];
++}
++
++static void EnsureApplicationActivationObserver() {
++  if (sApplicationActivationObserver) {
++    return;
++  }
++
++  mozilla::Preferences::RegisterCallbackAndCall(
++      ZenMirrorStandaloneWindowPref, "zen.standalone-window.enabled");
++
++  sApplicationActivationObserver = [[[NSNotificationCenter defaultCenter]
++      addObserverForName:NSApplicationDidBecomeActiveNotification
++                  object:nil
++                   queue:nil
++              usingBlock:^(NSNotification*) {
++                sApplicationActivatedAt =
++                    [NSDate timeIntervalSinceReferenceDate];
++              }] retain];
++
++  NSWorkspace* workspace = [NSWorkspace sharedWorkspace];
++  RememberPreviousApplication(workspace.frontmostApplication);
++  sWorkspaceActivationObserver = [[workspace.notificationCenter
++      addObserverForName:NSWorkspaceDidActivateApplicationNotification
++                  object:nil
++                   queue:nil
++              usingBlock:^(NSNotification* note) {
++                RememberPreviousApplication(
++                    note.userInfo[NSWorkspaceApplicationKey]);
++              }] retain];
++}
++
+ // This view is used in the dock tile when we're downloading a file.
+ // It draws a progress bar that looks similar to the native progress bar on
+ // 10.12. This style of progress bar is not animated, unlike the pre-10.10
+@@ -81,7 +163,9 @@ - (void)drawRect:(NSRect)aRect {
+       mDockBadgeView(nil),
+       mProgressDockOverlayView(nil),
+       mProgressState(STATE_NO_PROGRESS),
+-      mProgressFraction(0.0) {}
++      mProgressFraction(0.0) {
++  EnsureApplicationActivationObserver();
++}
+ 
+ nsMacDockSupport::~nsMacDockSupport() {
+   if (mDockTileWrapperView) {
+@@ -111,12 +195,134 @@ - (void)drawRect:(NSRect)aRect {
+   return NS_OK;
+ }
+ 
++static void ZenActivateApplicationForUser() {
++  NSApplication* app = [NSApplication sharedApplication];
++  NSRunningApplication* current = [NSRunningApplication currentApplication];
++
++  // Activation shows the application, but does not unhide its windows.
++  if ([app isHidden]) {
++    [app unhide:nil];
++  }
++
++  if (@available(macOS 14.0, *)) {
++    NSRunningApplication* frontmost =
++        [[NSWorkspace sharedWorkspace] frontmostApplication];
++    if (frontmost && ![frontmost isEqual:current] &&
++        [current activateFromApplication:frontmost
++                                 options:NSApplicationActivateAllWindows]) {
++      return;
++    }
++  }
++
++  // Older systems and already-frontmost activation use the legacy fallback.
++  [app activateIgnoringOtherApps:YES];
++}
++
+ NS_IMETHODIMP
+ nsMacDockSupport::ActivateApplication(bool aIgnoreOtherApplications) {
+   NS_OBJC_BEGIN_TRY_BLOCK_RETURN;
+ 
+-  [[NSApplication sharedApplication]
+-      activateIgnoringOtherApps:aIgnoreOtherApplications];
++  if (!aIgnoreOtherApplications) {
++    [[NSApplication sharedApplication] activateIgnoringOtherApps:NO];
++    return NS_OK;
++  }
++
++  ZenActivateApplicationForUser();
++  return NS_OK;
++
++  NS_OBJC_END_TRY_BLOCK_RETURN(NS_ERROR_FAILURE);
++}
++
++NS_IMETHODIMP
++nsMacDockSupport::GetIsApplicationActive(bool* aIsActive) {
++  NS_OBJC_BEGIN_TRY_BLOCK_RETURN;
++
++  *aIsActive = [[NSApplication sharedApplication] isActive];
++  return NS_OK;
++
++  NS_OBJC_END_TRY_BLOCK_RETURN(NS_ERROR_FAILURE);
++}
++
++NS_IMETHODIMP
++nsMacDockSupport::GetMillisecondsSinceApplicationActivated(
++    int64_t* aElapsed) {
++  NS_OBJC_BEGIN_TRY_BLOCK_RETURN;
++
++  EnsureApplicationActivationObserver();
++  if (sApplicationActivatedAt < 0.0) {
++    *aElapsed = -1;
++    return NS_OK;
++  }
++
++  NSTimeInterval elapsed =
++      [NSDate timeIntervalSinceReferenceDate] - sApplicationActivatedAt;
++  *aElapsed = elapsed <= 0.0 ? 0 : (int64_t)(elapsed * 1000.0);
++  return NS_OK;
++
++  NS_OBJC_END_TRY_BLOCK_RETURN(NS_ERROR_FAILURE);
++}
++
++NS_IMETHODIMP
++nsMacDockSupport::HideApplication() {
++  NS_OBJC_BEGIN_TRY_BLOCK_RETURN;
++
++  NSRunningApplication* previousApplication =
++      [[sPreviousApplication retain] autorelease];
++  if (!previousApplication || previousApplication.terminated) {
++    return NS_OK;
++  }
++
++  if (@available(macOS 14.0, *)) {
++    [[NSApplication sharedApplication]
++        yieldActivationToApplication:previousApplication];
++    return [previousApplication activateWithOptions:0] ? NS_OK
++                                                       : NS_ERROR_FAILURE;
++  }
++
++  return [previousApplication
++             activateWithOptions:NSApplicationActivateIgnoringOtherApps]
++             ? NS_OK
++             : NS_ERROR_FAILURE;
++
++  NS_OBJC_END_TRY_BLOCK_RETURN(NS_ERROR_FAILURE);
++}
++
++NS_IMETHODIMP
++nsMacDockSupport::MakeWindowJoinActiveSpace(nsIBaseWindow* aWindow) {
++  NS_OBJC_BEGIN_TRY_BLOCK_RETURN;
++
++  if (!aWindow) {
++    return NS_ERROR_INVALID_ARG;
++  }
++
++  nsCOMPtr<nsIWidget> widget = aWindow->GetMainWidget();
++  if (!widget) {
++    return NS_ERROR_FAILURE;
++  }
++
++  NSWindow* nativeWindow = (NSWindow*)widget->GetNativeData(NS_NATIVE_WINDOW);
++  if (!nativeWindow) {
++    return NS_ERROR_FAILURE;
++  }
++
++  NSWindowCollectionBehavior behavior = [nativeWindow collectionBehavior];
++  behavior &= ~(NSWindowCollectionBehaviorFullScreenPrimary |
++                NSWindowCollectionBehaviorFullScreenAuxiliary |
++                NSWindowCollectionBehaviorFullScreenAllowsTiling |
++                NSWindowCollectionBehaviorFullScreenDisallowsTiling);
++  behavior |= NSWindowCollectionBehaviorMoveToActiveSpace |
++              NSWindowCollectionBehaviorFullScreenAuxiliary |
++              NSWindowCollectionBehaviorFullScreenDisallowsTiling;
++
++  // On macOS 13+, this role permits joining another application's fullscreen
++  // Space without changing the panel's ordinary window level.
++  if (@available(macOS 13.0, *)) {
++    behavior &= ~(NSWindowCollectionBehaviorPrimary |
++                  NSWindowCollectionBehaviorAuxiliary);
++    behavior |= NSWindowCollectionBehaviorCanJoinAllApplications;
++  }
++
++  [nativeWindow setCollectionBehavior:behavior];
+   return NS_OK;
+ 
+   NS_OBJC_END_TRY_BLOCK_RETURN(NS_ERROR_FAILURE);

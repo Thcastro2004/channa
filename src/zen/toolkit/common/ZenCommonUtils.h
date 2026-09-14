@@ -11,6 +11,8 @@
 #include "nsGlobalWindowOuter.h"
 #include "nsIURI.h"
 
+class nsIBaseWindow;
+
 namespace zen {
 
 /**
@@ -53,6 +55,16 @@ class ZenCommonUtils final : public nsIZenCommonUtils {
   }
 #else
   static auto PlayHapticFeedbackInternal() -> nsresult;
+#endif
+
+#if !defined(XP_MACOSX)
+  static void PrepareStandalonePanelInternal() {}
+  static void CancelPreparedStandalonePanelInternal() {}
+  static bool IsStandalonePanelInternal(nsIBaseWindow*) { return false; }
+#else
+  static void PrepareStandalonePanelInternal();
+  static void CancelPreparedStandalonePanelInternal();
+  static bool IsStandalonePanelInternal(nsIBaseWindow*);
 #endif
 };
 

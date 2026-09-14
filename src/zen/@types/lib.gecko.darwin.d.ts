@@ -49,6 +49,10 @@ declare global {
   interface nsIMacDockSupport extends nsISupports {
     dockMenu: nsIStandaloneNativeMenu;
     activateApplication(aIgnoreOtherApplications: boolean): void;
+    readonly isApplicationActive: boolean;
+    readonly millisecondsSinceApplicationActivated: i64;
+    hideApplication(): void;
+    makeWindowJoinActiveSpace(aWindow: nsIBaseWindow): void;
     badgeText: string;
     setBadgeImage(
       aBadgeImage: imgIContainer,

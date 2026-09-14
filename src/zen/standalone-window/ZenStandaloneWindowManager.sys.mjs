@@ -2,6 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+/* eslint-disable mozilla/valid-services -- Services.zen is Zen's custom XPCOM service. */
+
 import { AppConstants } from "resource://gre/modules/AppConstants.sys.mjs";
 
 const lazy = {};
@@ -15,12 +17,38 @@ ChromeUtils.defineLazyGetter(lazy, "MacDockSupport", () => {
   if (AppConstants.platform !== "macosx") {
     return null;
   }
-  return Cc["@mozilla.org/widget/macdocksupport;1"].getService(
-    Ci.nsIMacDockSupport,
-  );
+  try {
+    const service = Cc["@mozilla.org/widget/macdocksupport;1"].getService(
+      Ci.nsIMacDockSupport,
+    );
+    return {
+      get millisecondsSinceApplicationActivated() {
+        return service.millisecondsSinceApplicationActivated;
+      },
+      get isApplicationActive() {
+        return service.isApplicationActive;
+      },
+      activatePreviousApplication() {
+        service.hideApplication();
+      },
+      makeWindowJoinActiveSpace(baseWindow) {
+        service.makeWindowJoinActiveSpace(baseWindow);
+      },
+      activateApplication(ignoreOtherApplications = false) {
+        service.activateApplication(ignoreOtherApplications);
+      },
+    };
+  } catch (error) {
+    console.error(
+      "Zen standalone windows cannot reach macOS dock support",
+      error,
+    );
+    return null;
+  }
 });
 
 export const ZEN_STANDALONE_WINDOW_TYPE = "zen:external-link-standalone";
+const STANDALONE_WINDOW_ACTIVATION_WINDOW_MS = 2000;
 
 export class nsZenStandaloneWindowManager {
   #nextExternalRequestId = 0;
@@ -71,8 +99,17 @@ export class nsZenStandaloneWindowManager {
       policyContainer: options?.policyContainer ?? null,
       userContextId: options?.userContextId ?? 0,
       targetRoute: null,
-      broughtApplicationForward: false,
+      broughtApplicationForward: this.wasApplicationJustActivated(),
     };
+  }
+
+  wasApplicationJustActivated() {
+    const elapsed = lazy.MacDockSupport?.millisecondsSinceApplicationActivated;
+    return (
+      typeof elapsed === "number" &&
+      elapsed >= 0 &&
+      elapsed <= STANDALONE_WINDOW_ACTIVATION_WINDOW_MS
+    );
   }
 
   /** @returns {Window|null} The newly constructed browser window. */
@@ -81,27 +118,77 @@ export class nsZenStandaloneWindowManager {
       return null;
     }
 
-    const args = Cc["@mozilla.org/supports-string;1"].createInstance(
-      Ci.nsISupportsString,
-    );
-    args.data = request.uriString;
+    let nativePanelPrepared = false;
+    try {
+      const args = Cc["@mozilla.org/supports-string;1"].createInstance(
+        Ci.nsISupportsString,
+      );
+      args.data = request.uriString;
 
-    const standaloneWindow = lazy.BrowserWindowTracker.openWindow({
-      private: request.isPrivate,
-      features: this.getStandaloneWindowFeatures(request),
-      all: true,
-      openerWindow: request.openerWindow,
-      args,
-      zenSyncedWindow: false,
-      zenStandaloneWindow: true,
-    });
+      Services.zen.prepareStandalonePanel();
+      nativePanelPrepared = true;
 
-    standaloneWindow._zenStartupSyncFlag = "unsynced";
-    standaloneWindow.ZenExternalLinkStandaloneType = ZEN_STANDALONE_WINDOW_TYPE;
-    if (request.userContextId) {
-      standaloneWindow._zenStartupUnsyncedUserContextId = request.userContextId;
+      const standaloneWindow = lazy.BrowserWindowTracker.openWindow({
+        private: request.isPrivate,
+        features: this.getStandaloneWindowFeatures(request),
+        all: true,
+        openerWindow: request.openerWindow,
+        args,
+        zenSyncedWindow: false,
+        zenStandaloneWindow: true,
+      });
+      if (!standaloneWindow) {
+        Services.zen.cancelPreparedStandalonePanel();
+        return null;
+      }
+
+      standaloneWindow._zenStartupSyncFlag = "unsynced";
+      standaloneWindow.ZenExternalLinkStandaloneType =
+        ZEN_STANDALONE_WINDOW_TYPE;
+      this.makeWindowFollowTheUser(standaloneWindow);
+      if (request.userContextId) {
+        standaloneWindow._zenStartupUnsyncedUserContextId =
+          request.userContextId;
+      }
+      return standaloneWindow;
+    } catch (error) {
+      if (nativePanelPrepared) {
+        try {
+          Services.zen.cancelPreparedStandalonePanel();
+        } catch {}
+      }
+      console.error("Failed to construct Zen standalone window", error);
+      return null;
     }
-    return standaloneWindow;
+  }
+
+  /** Focuses the native non-activating panel without activating Zen. */
+  presentExternalStandaloneWindow(standaloneWindow) {
+    try {
+      standaloneWindow.focus();
+    } catch (error) {
+      console.error("Failed to focus a new Zen standalone window", error);
+    }
+  }
+
+  /** Makes the panel follow the user onto the currently active macOS Space. */
+  makeWindowFollowTheUser(standaloneWindow) {
+    const dockSupport = lazy.MacDockSupport;
+    if (!dockSupport || Services.env.get("MOZ_HEADLESS")) {
+      return;
+    }
+
+    try {
+      const baseWindow = standaloneWindow.docShell.treeOwner.QueryInterface(
+        Ci.nsIBaseWindow,
+      );
+      dockSupport.makeWindowJoinActiveSpace(baseWindow);
+    } catch (error) {
+      console.error(
+        "Failed to make a Zen standalone window join the active Space",
+        error,
+      );
+    }
   }
 
   /** Attaches the standalone identity and state to a browser window. */
@@ -308,7 +395,11 @@ export class nsZenStandaloneWindowManager {
 
   #openRequest(request) {
     const standaloneWindow = this.constructStandaloneWindow(request);
+    if (!standaloneWindow) {
+      return null;
+    }
     this.markWindowAsStandalone(standaloneWindow, request);
+    this.presentExternalStandaloneWindow(standaloneWindow);
 
     this.#initializeStandaloneWindow(standaloneWindow).catch((error) => {
       console.error("Could not initialize standalone window", error);
@@ -324,7 +415,26 @@ export class nsZenStandaloneWindowManager {
       return;
     }
 
+    if (AppConstants.platform === "macosx") {
+      const baseWindow = standaloneWindow.docShell.treeOwner.QueryInterface(
+        Ci.nsIBaseWindow,
+      );
+      if (!Services.zen.isStandalonePanel(baseWindow)) {
+        const state = standaloneWindow.ZenExternalLinkStandalone;
+        state.isKeeping = true;
+        state.isClosing = true;
+        standaloneWindow.skipNextCanClose = true;
+        standaloneWindow.close();
+        this.#resolveStandaloneWindowReady(standaloneWindow);
+        throw new Error(
+          "Refusing to initialize a standalone window without its native panel",
+        );
+      }
+    }
+
     this.markStandaloneDocument(standaloneWindow);
+    // Browser chrome can update fullscreen collection flags after creation.
+    this.makeWindowFollowTheUser(standaloneWindow);
     this.#resolveStandaloneWindowReady(standaloneWindow);
   }
 

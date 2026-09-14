@@ -19761,6 +19761,9 @@ declare global {
     ): void;
     canShare(): boolean;
     playHapticFeedback(): void;
+    prepareStandalonePanel(): void;
+    cancelPreparedStandalonePanel(): void;
+    isStandalonePanel(window: nsIBaseWindow): boolean;
   }
 
   // https://searchfox.org/firefox-main/source/zen/drag-and-drop/nsIZenDragAndDrop.idl

@@ -1,0 +1,24 @@
+diff --git a/widget/cocoa/nsAppShell.mm b/widget/cocoa/nsAppShell.mm
+index 5bdd7894d0dbdcb075f2e08405b97fe7e6bac89c..6b827c586b7b79a5ff0a61ba6a68622e9a115f09 100644
+--- a/widget/cocoa/nsAppShell.mm
++++ b/widget/cocoa/nsAppShell.mm
+@@ -364,6 +364,8 @@ void RunLoopObserverCallback(CFRunLoopObserverRef aObserver,
+ // interrupt the main native run loop.
+ //
+ // public
++extern bool ZenSuppressLaunchActivation();
++
+ nsresult nsAppShell::Init() {
+   NS_OBJC_BEGIN_TRY_BLOCK_RETURN;
+ 
+@@ -374,6 +376,10 @@ void RunLoopObserverCallback(CFRunLoopObserverRef aObserver,
+   char* mozAppNoDock = PR_GetEnv("MOZ_APP_NO_DOCK");
+   if (mozAppNoDock && strcmp(mozAppNoDock, "") != 0) {
+     [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
++  } else if (XRE_IsParentProcess()) {
++    // A launch that may receive an external link starts without activation so
++    // macOS cannot move the user away before there is a window to place.
++    ZenSuppressLaunchActivation();
+   }
+ 
+   // mAutoreleasePools is used as a stack of NSAutoreleasePool objects created
