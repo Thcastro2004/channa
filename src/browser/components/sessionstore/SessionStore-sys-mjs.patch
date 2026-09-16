@@ -23,6 +23,20 @@ index 536e06eec9f35bad3b8366733b23b5a8697df9c8..631a16bc7518108641993836f0c52e2a
  });
  
  ChromeUtils.defineLazyGetter(lazy, "blankURI", () => {
+@@ -662,6 +669,13 @@
+ 
+   maybeDontRestoreTabs(aWindow) {
+     SessionStoreInternal.maybeDontRestoreTabs(aWindow);
++  },
++
++  recordClosedTabForOtherWindow(aTargetWindow, aTab) {
++    return SessionStoreInternal.recordClosedTabForOtherWindow(
++      aTargetWindow,
++      aTab
++    );
+   },
+ 
+   undoCloseWindow: function ss_undoCloseWindow(aIndex) {
 @@ -1317,10 +1324,7 @@ var SessionStoreInternal = {
     */
    get willAutoRestore() {
@@ -47,12 +61,18 @@ index 536e06eec9f35bad3b8366733b23b5a8697df9c8..631a16bc7518108641993836f0c52e2a
          this.saveStateDelayed(win);
          break;
        case "TabGroupCreate":
-@@ -2117,6 +2126,10 @@ var SessionStoreInternal = {
+@@ -2117,6 +2130,16 @@
        this._windows[aWindow.__SSi].isTaskbarTab = true;
      }
  
 +    if (aWindow.document.documentElement.hasAttribute("zen-unsynced-window")) {
 +      this._windows[aWindow.__SSi].isZenUnsynced = true;
++    }
++
++    // Transient windows never join the saved session or window sync.
++    if (aWindow._zenStandaloneWindow) {
++      this._windows[aWindow.__SSi].isZenUnsynced = true;
++      this._windows[aWindow.__SSi].isZenStandalone = true;
 +    }
 +
      if (lazy.AIWindow.isAIWindowActiveAndEnabled(aWindow)) {
@@ -67,12 +87,17 @@ index 536e06eec9f35bad3b8366733b23b5a8697df9c8..631a16bc7518108641993836f0c52e2a
  
      // perform additional initialization when the first window is loading
      if (lazy.RunState.isStopped) {
-@@ -2165,7 +2178,7 @@ var SessionStoreInternal = {
+@@ -2165,7 +2188,12 @@
          // to disk to NOW() to enforce a full interval before the next write.
          lazy.SessionSaver.updateLastSaveTime();
  
 -        if (isPrivateWindow || isTaskbarTab) {
-+        if (isPrivateWindow || isTaskbarTab || aWindow.document.documentElement.hasAttribute("zen-unsynced-window")) {
++        if (
++          isPrivateWindow ||
++          isTaskbarTab ||
++          aWindow._zenStandaloneWindow ||
++          aWindow.document.documentElement.hasAttribute("zen-unsynced-window")
++        ) {
            this._log.debug(
              "initializeWindow, the window is private or a web app. Saving SessionStartup.state for possibly restoring later"
            );
@@ -168,7 +193,32 @@ index 536e06eec9f35bad3b8366733b23b5a8697df9c8..631a16bc7518108641993836f0c52e2a
        // If sidebar command is truthy, i.e. sidebar is open, store sidebar settings
        let shouldStore = hasSaveableTabs || isLastWindow;
  
-@@ -3525,7 +3544,7 @@ var SessionStoreInternal = {
+@@ -3385,8 +3415,14 @@
+       return;
+     }
+ 
+-    // Get the latest data for this tab (generally, from the cache)
+-    let tabState = lazy.TabState.collect(aTab, TAB_CUSTOM_VALUES.get(aTab));
++    // Native teardown can detach the browser before its close callback runs.
++    let tabState;
++    try {
++      tabState = lazy.TabState.collect(aTab, TAB_CUSTOM_VALUES.get(aTab));
++    } catch (error) {
++      this._log.debug("Cannot collect a detached closing tab", error);
++      return;
++    }
+ 
+     // Store closed-tab data for undo.
+     this.maybeSaveClosedTab(aWindow, aTab, tabState);
+@@ -3520,22 +3556,31 @@
+     tabState,
+     { closedTabsArray, closedInTabGroup = false } = {}
+   ) {
++    if (!aTab?.linkedBrowser) {
++      return;
++    }
+     // Don't save private tabs
+     let isPrivateWindow = PrivateBrowsingUtils.isWindowPrivate(aWindow);
      if (!isPrivateWindow && tabState.isPrivate) {
        return;
      }
@@ -177,6 +227,111 @@ index 536e06eec9f35bad3b8366733b23b5a8697df9c8..631a16bc7518108641993836f0c52e2a
        return;
      }
  
+     let permanentKey = aTab.linkedBrowser.permanentKey;
++    let image = aTab.getAttribute("image") || null;
++    try {
++      image = aWindow.gBrowser.getIcon(aTab) || image;
++    } catch (error) {
++      this._log.debug("Cannot read a closed tab icon", error);
++    }
+ 
+     let tabData = {
+       permanentKey,
+       state: tabState,
+       title: aTab.label,
+-      image: aWindow.gBrowser.getIcon(aTab),
++      image,
+       pos: aTab._tPos,
+       closedAt: Date.now(),
+       closedInGroup: aTab._closedInMultiselection,
+@@ -3686,6 +3731,87 @@
+     }
+   },
+ 
++  /** Records a transient page in a normal window's Undo Close Tab history. */
++  recordClosedTabForOtherWindow(aTargetWindow, aTab) {
++    if (this._max_tabs_undo === 0 || !aTargetWindow?.__SSi) {
++      return { ok: false, reason: "undo-disabled-or-target-missing" };
++    }
++    const winData = this._windows[aTargetWindow.__SSi];
++    if (!winData || winData.isZenStandalone || aTargetWindow.closed) {
++      return { ok: false, reason: "target-not-tracked" };
++    }
++    const browser = aTab?.linkedBrowser;
++    if (!browser) {
++      return { ok: false, reason: "source-browser-detached" };
++    }
++    if (
++      PrivateBrowsingUtils.isBrowserPrivate(browser) !==
++      PrivateBrowsingUtils.isWindowPrivate(aTargetWindow)
++    ) {
++      return { ok: false, reason: "privacy-mismatch" };
++    }
++    let tabState;
++    try {
++      tabState = lazy.TabState.collect(aTab, TAB_CUSTOM_VALUES.get(aTab));
++    } catch (error) {
++      this._log.warn("Cannot collect a standalone page", error);
++      return { ok: false, reason: "source-state-unavailable" };
++    }
++    if (
++      !tabState.entries?.length &&
++      browser.currentURI?.spec !== "about:blank"
++    ) {
++      const uri = browser.currentURI;
++      if (uri) {
++        const principal = browser.contentPrincipal;
++        tabState.entries = [
++          {
++            url: uri.spec,
++            title: aTab.label,
++            triggeringPrincipal_base64:
++              (principal && lazy.E10SUtils.serializePrincipal(principal)) ||
++              lazy.E10SUtils.SERIALIZED_SYSTEMPRINCIPAL,
++          },
++        ];
++        tabState.index = 1;
++      }
++    }
++    if (tabState.isPrivate) {
++      return { ok: false, reason: "private-state" };
++    }
++    if (!this._shouldSaveTabState(tabState)) {
++      return { ok: false, reason: "unsaveable-state" };
++    }
++    // Recovery belongs to the destination's current space, never the old identity.
++    tabState.pinned = false;
++    tabState.zenEssential = false;
++    tabState.zenSyncId = null;
++    tabState.zenIsGlance = false;
++    tabState.zenGlanceId = null;
++    tabState.zenHasStaticLabel = false;
++    tabState.zenWorkspace = null;
++    tabState.groupId = null;
++    let image = aTab.getAttribute("image") || null;
++    try {
++      image = aTab.ownerGlobal?.gBrowser?.getIcon(aTab) || image;
++    } catch (error) {
++      this._log.debug("Cannot read an archived standalone icon", error);
++    }
++    const tabData = {
++      permanentKey: browser.permanentKey,
++      state: tabState,
++      title: aTab.label,
++      image,
++      pos: 0,
++      closedAt: Date.now(),
++      closedInGroup: false,
++      closedInTabGroupId: null,
++      sourceWindowId: aTargetWindow.__SSi,
++    };
++    this.saveClosedTabData(winData, winData._closedTabs, tabData);
++    return { ok: true, reason: "recorded", closedId: tabData.closedId };
++  },
++
+   /**
+    * Insert a given |tabData| object into the list of |closedTabs|. We will
+    * determine the right insertion point based on the .closedAt properties of
 @@ -4264,6 +4283,12 @@ var SessionStoreInternal = {
          Math.min(tabState.index, tabState.entries.length)
        );
@@ -220,12 +375,16 @@ index 536e06eec9f35bad3b8366733b23b5a8697df9c8..631a16bc7518108641993836f0c52e2a
          removableTabs.push(tab);
        }
      }
-@@ -5674,7 +5702,7 @@ var SessionStoreInternal = {
+@@ -5674,7 +5800,11 @@
  
      // collect the data for all windows
      for (ix in this._windows) {
 -      if (this._windows[ix]._restoring || this._windows[ix].isTaskbarTab) {
-+      if (this._windows[ix]._restoring || this._windows[ix].isTaskbarTab && !this._windows[ix].isZenUnsynced) {
++      if (
++        this._windows[ix]._restoring ||
++        this._windows[ix].isZenStandalone ||
++        (this._windows[ix].isTaskbarTab && !this._windows[ix].isZenUnsynced)
++      ) {
          // window data is still in _statesToRestore
          continue;
        }
@@ -330,6 +489,32 @@ index 536e06eec9f35bad3b8366733b23b5a8697df9c8..631a16bc7518108641993836f0c52e2a
  
      let promiseParts = Promise.withResolvers();
      aWindow.setTimeout(() => {
+@@ -7159,7 +7319,11 @@
+   _browserWindows: {
+     *[Symbol.iterator]() {
+       for (let window of lazy.BrowserWindowTracker.orderedWindows) {
+-        if (window.__SSi && !window.closed) {
++        if (
++          window.__SSi &&
++          SessionStoreInternal._windows[window.__SSi] &&
++          !window.closed
++        ) {
+           yield window;
+         }
+       }
+@@ -7190,7 +7350,11 @@
+         return 0;
+       });
+       for (let window of windows) {
+-        if (window.__SSi && !window.closed) {
++        if (
++          window.__SSi &&
++          SessionStoreInternal._windows[window.__SSi] &&
++          !window.closed
++        ) {
+           yield window;
+         }
+       }
 @@ -7654,7 +7715,7 @@ var SessionStoreInternal = {
  
        let groupsToSave = new Map();

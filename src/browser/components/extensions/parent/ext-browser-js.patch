@@ -18,6 +18,20 @@ index 91adc6bc3649af47745818e6f9d00cbbdffc35a5..e221b077dbfbe20c8696732f003bd580
  
      this._tabs.set(nativeTab, id);
      this._tabIds.set(id, nativeTab);
+@@ -754,6 +756,13 @@
+     }
+ 
+     const nativeTab = this.getTabForBrowser(browser);
++    // A late navigation event may outlive a standalone's temporary tab.
++    if (
++      nativeTab &&
++      (!nativeTab.parentNode || nativeTab.documentGlobal?.closed)
++    ) {
++      return { tabId: -1, windowId: -1 };
++    }
+     if (nativeTab) {
+       // If window was about:addons, use the browser window instead.
+       window = nativeTab.documentGlobal;
 @@ -1262,6 +1264,10 @@ class TabManager extends TabManagerBase {
    }
  

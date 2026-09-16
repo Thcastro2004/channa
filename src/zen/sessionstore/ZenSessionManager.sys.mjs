@@ -366,6 +366,15 @@ export class nsZenSessionManager {
     if (initialState?.savedGroups) {
       initialState.savedGroups = [];
     }
+    // Filter both disk and deferred startup state, regardless of window sync.
+    if (initialState?.windows?.length) {
+      initialState.windows = initialState.windows.filter(win => {
+        if (win.isZenStandalone) {
+          this.log("Skipping standalone window during restore");
+        }
+        return !win.isZenStandalone;
+      });
+    }
     if (!lazy.gWindowSyncEnabled) {
       if (initialState?.windows?.length && this.#shouldRestoreOnlyPinned) {
         this.log("Window sync disabled, restoring only pinned tabs");

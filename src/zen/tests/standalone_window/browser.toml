@@ -1,0 +1,5 @@
+[DEFAULT]
+skip-if = ["os != 'mac'"]
+prefs = ["zen.standalone-window.enabled=true"]
+
+["browser_external_link_standalone_window.js"]
