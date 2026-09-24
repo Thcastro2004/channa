@@ -54,6 +54,18 @@ async function closeStandalone(win) {
   await closed;
 }
 
+function isEffectivelyHidden(element) {
+  if (!element) {
+    return true;
+  }
+  const ownerWindow = element.ownerGlobal ?? element.ownerDocument?.defaultView;
+  if (!ownerWindow) {
+    return true;
+  }
+  const { display, visibility } = ownerWindow.getComputedStyle(element);
+  return display === "none" || visibility === "hidden";
+}
+
 add_task(async function external_routing_and_workspace_exclusion() {
   const spaces = gZenWorkspaces.getWorkspaces().map(space => space.uuid);
   const count = gBrowser.tabs.length;
@@ -125,6 +137,51 @@ add_task(async function external_routing_and_workspace_exclusion() {
         );
       }
     }
+  } finally {
+    await closeStandalone(win);
+  }
+});
+
+add_task(async function standalone_chrome_is_minimal() {
+  const win = await openStandalone("minimal-chrome");
+  try {
+    const { document } = win;
+    for (const id of [
+      "forward-button",
+      "stop-reload-button",
+      "unified-extensions-button",
+      "fxa-toolbar-menu-button",
+      "nav-bar-overflow-button",
+      "PanelUI-button",
+    ]) {
+      Assert.ok(
+        isEffectivelyHidden(document.getElementById(id)),
+        `${id} is hidden`
+      );
+    }
+    Assert.ok(
+      !isEffectivelyHidden(document.getElementById("urlbar-container")),
+      "Address bar remains visible"
+    );
+    Assert.ok(
+      !isEffectivelyHidden(
+        document.getElementById("zen-standalone-window-keep")
+      ),
+      "Keep control remains visible"
+    );
+    const backButton = document.getElementById("back-button");
+    const backCommand = document.getElementById("Browser:Back");
+    Assert.equal(
+      isEffectivelyHidden(backButton),
+      backCommand.hasAttribute("disabled"),
+      "Back is visible exactly when history is available"
+    );
+    Assert.equal(
+      win.getComputedStyle(document.getElementById("zen-tabbox-wrapper"))
+        .marginInlineStart,
+      "0px",
+      "Page sits flush against the window"
+    );
   } finally {
     await closeStandalone(win);
   }

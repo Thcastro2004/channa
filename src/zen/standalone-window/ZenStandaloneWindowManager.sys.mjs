@@ -1212,8 +1212,22 @@ export class nsZenStandaloneWindowManager {
     return AppConstants.platform === "macosx" ? "⌘O" : "Ctrl+O";
   }
 
-  relocateStandaloneWindowButtons() {
-    // Traffic-light placement lands with the standalone chrome in phase 4.
+  relocateStandaloneWindowButtons(win) {
+    const document = win.document;
+    const container = document.getElementById(
+      "zen-appcontent-navbar-container"
+    );
+    const buttons =
+      win.gZenUIManager?.actualWindowButtons ??
+      document.querySelector(".titlebar-buttonbox-container");
+
+    // Controls already in the navbar do not need moving.
+    if (!container || !buttons || !buttons.closest("#navigator-toolbox")) {
+      return;
+    }
+
+    container.prepend(buttons);
+    container.setAttribute("zen-standalone-window-has-buttons", "true");
   }
 
   insertStandaloneToolbar(win, toolbar) {

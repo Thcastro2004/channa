@@ -341,6 +341,320 @@ body,
   }
 }
 
+/* Standalone windows keep the real navigation bar for their single editable tab.
+   Workspace chrome is hidden by the root attribute so rebuilt chrome stays hidden. */
+:root[zen-standalone-window="true"] {
+  --zen-standalone-window-chevron-width: 26px;
+  --zen-standalone-window-keep-height: 26px;
+  --zen-standalone-window-keep-radius: 6px;
+
+  /* The toolbox is the sidebar itself and retains its persisted width. */
+  & #navigator-toolbox,
+  & #zen-sidebar-splitter,
+  & #sidebar-container,
+  & #sidebar-launcher-splitter,
+  & #sidebar-box,
+  & #sidebar-splitter,
+  & #PersonalToolbar,
+  & #ai-window,
+  & #ai-window-splitter {
+    display: none !important;
+  }
+
+  & #zen-tabbox-wrapper {
+    margin: 0 !important;
+  }
+
+  & #tabbrowser-tabbox #tabbrowser-tabpanels .browserSidebarContainer {
+    border-radius: 0 !important;
+    box-shadow: none !important;
+  }
+
+  & #zen-appcontent-navbar-wrapper {
+    display: flex;
+    -moz-window-dragging: drag;
+  }
+
+  & #zen-appcontent-navbar-container {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding-inline-end: var(--zen-element-separation);
+  }
+
+  & #nav-bar {
+    flex: 1;
+    min-width: 0;
+    -moz-window-dragging: no-drag;
+  }
+
+  & #urlbar-container {
+    flex: 1;
+    min-width: 0;
+  }
+
+  /* Keep only Back and the address bar, including its own inner controls. */
+  & #nav-bar > :not(#nav-bar-customization-target, .titlebar-buttonbox-container, #zen-standalone-window-toolbar),
+  & #nav-bar-customization-target > :not(#back-button, #urlbar-container) {
+    display: none !important;
+  }
+
+  & #back-button[disabled="true"] {
+    display: none !important;
+  }
+
+  & #zen-standalone-window-toolbar {
+    flex: 0 0 auto;
+    -moz-window-dragging: no-drag;
+  }
+
+  & #zen-appcontent-navbar-container[zen-standalone-window-has-buttons="true"] > .titlebar-buttonbox-container {
+    order: -1;
+    align-self: center;
+    height: auto;
+    -moz-window-dragging: no-drag;
+
+    /* Restore the macOS inset normally supplied by the hidden sidebar. */
+    @media (-moz-platform: macos) {
+      margin-inline-start: calc(12px - var(--zen-toolbox-padding));
+      margin-inline-end: 6px;
+    }
+  }
+}
+
+#zen-standalone-window-keep {
+  align-items: center;
+  gap: 0;
+  border-radius: var(--zen-standalone-window-keep-radius);
+  background: color-mix(in srgb, currentColor 9%, transparent);
+  /* The segments paint their own hover fill, so keep the edge above it. */
+  outline: 1px solid color-mix(in srgb, currentColor 13%, transparent);
+  outline-offset: -1px;
+
+  &:hover {
+    background: color-mix(in srgb, currentColor 13%, transparent);
+  }
+
+  & > [role="button"] {
+    align-items: center;
+    height: var(--zen-standalone-window-keep-height);
+
+    &:first-child {
+      border-start-start-radius: var(--zen-standalone-window-keep-radius);
+      border-end-start-radius: var(--zen-standalone-window-keep-radius);
+    }
+
+    &:last-child {
+      border-start-end-radius: var(--zen-standalone-window-keep-radius);
+      border-end-end-radius: var(--zen-standalone-window-keep-radius);
+    }
+
+    &:hover {
+      background: color-mix(in srgb, currentColor 12%, transparent);
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--focus-outline-color, AccentColor);
+      outline-offset: -2px;
+    }
+  }
+
+  & > #zen-standalone-window-open-in-space-button {
+    padding-inline: 10px 8px;
+    gap: 4px;
+
+    & > label {
+      margin: 0;
+    }
+
+    & > .zen-standalone-window-keep-prefix {
+      opacity: 0.7;
+    }
+
+    & > .zen-standalone-window-keep-space {
+      font-weight: 600;
+    }
+
+    & > .zen-standalone-window-shortcut {
+      margin-inline-start: 4px;
+      opacity: 0.55;
+    }
+  }
+
+  & > #zen-standalone-window-space-picker-button {
+    box-sizing: border-box;
+    justify-content: center;
+    width: var(--zen-standalone-window-chevron-width);
+    border-inline-start: 1px solid color-mix(in srgb, currentColor 13%, transparent);
+
+    & > .zen-standalone-window-chevron {
+      width: 10px;
+      height: 10px;
+      opacity: 0.75;
+      -moz-context-properties: fill;
+      fill: currentColor;
+      list-style-image: url("chrome://global/skin/icons/arrow-down.svg");
+    }
+  }
+}
+
+/* Attribute selectors match the specificity of the shared arrow-panel rules. */
+panel[type="arrow"][nonnative][orient]#PanelUI-zen-standalone-window-spaces {
+  appearance: none !important;
+  background-color: transparent !important;
+
+  --panel-padding: 0;
+  --panel-width: 200px;
+  --panel-background-color: var(--arrowpanel-background) !important;
+  --panel-border-color: color-mix(in srgb, currentColor 14%, transparent) !important;
+  --panel-border-radius: var(--zen-standalone-window-keep-radius, 6px);
+  --panel-box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28) !important;
+  --panel-box-shadow-margin: 0px !important;
+  --zen-standalone-window-space-tile-size: 20px;
+  --zen-standalone-window-picker-anchor-height: var(--zen-standalone-window-keep-height, 26px);
+
+  &::part(content) {
+    background-color: var(--arrowpanel-background) !important;
+  }
+
+  & #PanelUI-zen-standalone-window-spaces-header {
+    height: var(--zen-standalone-window-picker-anchor-height);
+    box-sizing: content-box;
+    padding-inline: 0;
+    border-bottom: 1px solid color-mix(in srgb, currentColor 10%, transparent);
+
+    & > #PanelUI-zen-standalone-window-spaces-search-icon {
+      width: var(--size-item-small, 16px);
+      height: var(--size-item-small, 16px);
+      margin-inline: 8px 6px;
+      opacity: 0.6;
+      -moz-context-properties: fill;
+      fill: currentColor;
+    }
+
+    & > #PanelUI-zen-standalone-window-spaces-search {
+      flex: 1;
+      min-width: 0;
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      appearance: none !important;
+      background: transparent;
+      border: none !important;
+      border-radius: 0 !important;
+      outline: none !important;
+      box-shadow: none !important;
+      font: inherit;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+
+      &::placeholder {
+        opacity: 0.45;
+      }
+    }
+
+    & > #PanelUI-zen-standalone-window-spaces-collapse {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-sizing: border-box;
+      flex: 0 0 auto;
+      align-self: stretch;
+      width: var(--zen-standalone-window-chevron-width, 26px);
+      min-height: 0;
+      margin: 0;
+      padding: 0;
+      appearance: none !important;
+      background: none !important;
+      border: none !important;
+      box-shadow: none !important;
+      -moz-context-properties: fill;
+      fill: currentColor;
+      list-style-image: url("chrome://global/skin/icons/arrow-up.svg");
+
+      & > .toolbarbutton-icon {
+        width: 10px;
+        height: 10px;
+        opacity: 0.75;
+      }
+
+      &:hover > .toolbarbutton-icon {
+        opacity: 1;
+      }
+    }
+  }
+
+  & #PanelUI-zen-standalone-window-spaces-list {
+    padding: 4px;
+    max-height: 260px;
+    overflow-y: auto;
+
+    & > toolbarbutton[hidden="true"] {
+      display: none;
+    }
+  }
+
+  & #PanelUI-zen-standalone-window-spaces-empty {
+    padding: 10px 12px;
+    opacity: 0.5;
+  }
+
+  & .zen-standalone-window-space-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    padding: 4px 6px;
+    overflow: hidden;
+    border-radius: calc(var(--zen-standalone-window-keep-radius, 6px) - 2px);
+
+    &[active="true"] {
+      background: color-mix(in srgb, currentColor 7%, transparent);
+    }
+
+    &:hover,
+    &:focus-visible {
+      background: color-mix(in srgb, currentColor 12%, transparent);
+    }
+
+    & > .zen-standalone-window-space-icon {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: var(--zen-standalone-window-space-tile-size);
+      height: var(--zen-standalone-window-space-tile-size);
+      border-radius: 6px;
+      flex-shrink: 0;
+      background: var(
+        --zen-standalone-window-space-accent,
+        color-mix(in srgb, currentColor 14%, transparent)
+      );
+      box-shadow: inset 0 0 0 1px color-mix(in srgb, black 12%, transparent);
+
+      & > .zen-standalone-window-space-icon-glyph {
+        margin: 0;
+        font-size: 11px;
+        line-height: 1;
+        text-transform: uppercase;
+      }
+
+      & > .zen-standalone-window-space-icon-image {
+        width: 12px;
+        height: 12px;
+        -moz-context-properties: fill;
+        fill: currentColor;
+      }
+    }
+
+    & > .zen-standalone-window-space-name {
+      min-width: 0;
+      margin: 0;
+      overflow: hidden;
+      font-weight: 500;
+    }
+  }
+}
+
 :root[zen-right-side="true"] #zen-appcontent-navbar-wrapper #PanelUI-button {
   order: 2;
 }
