@@ -380,11 +380,17 @@ body,
     align-items: center;
     gap: 6px;
     padding-inline-end: var(--zen-element-separation);
+    -moz-window-dragging: drag;
   }
 
   & #nav-bar {
     flex: 1;
     min-width: 0;
+    -moz-window-dragging: drag;
+  }
+
+  & #urlbar-container,
+  & #back-button {
     -moz-window-dragging: no-drag;
   }
 

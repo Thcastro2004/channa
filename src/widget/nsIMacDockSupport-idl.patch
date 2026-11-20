@@ -1,5 +1,5 @@
 diff --git a/widget/nsIMacDockSupport.idl b/widget/nsIMacDockSupport.idl
-index c7edfb58819aa9ae2b5941028fea6befc620a91d..ed4374fd281f054286611bf83fb5d8450dfbbb4a 100644
+index c7edfb58819aa9ae2b5941028fea6befc620a91d..6ba4807704ed9ece7dc0a205b9509d9430724417 100644
 --- a/widget/nsIMacDockSupport.idl
 +++ b/widget/nsIMacDockSupport.idl
 @@ -8,6 +8,7 @@ interface nsIStandaloneNativeMenu;
@@ -10,7 +10,7 @@ index c7edfb58819aa9ae2b5941028fea6befc620a91d..ed4374fd281f054286611bf83fb5d845
  
  [scriptable, uuid(2cbde069-b80d-4e63-b7c7-c4dfe4617028)]
  interface nsIAppBundleLaunchOptions : nsISupports {
-@@ -44,6 +45,28 @@ interface nsIMacDockSupport : nsISupports
+@@ -44,6 +45,29 @@ interface nsIMacDockSupport : nsISupports
     */
    void activateApplication(in boolean aIgnoreOtherApplications);
  
@@ -35,7 +35,15 @@ index c7edfb58819aa9ae2b5941028fea6befc620a91d..ed4374fd281f054286611bf83fb5d845
 +   * activated, rather than the system switching Spaces to reach the window.
 +   */
 +  void makeWindowJoinActiveSpace(in nsIBaseWindow aWindow);
++  unsigned long getWindowNumber(in nsIBaseWindow aWindow);
 +
    /**
     * Text used to badge the dock tile. Setting this will remove any badge image.
     */
+@@ -95,4 +119,6 @@ interface nsIMacDockSupport : nsISupports
+    */
+   void launchAppBundle(in nsIFile aAppBundle, in Array<AString> aArgs,
+                        [optional] in nsIAppBundleLaunchOptions aLaunchOptions);
++  readonly attribute long externalApplicationPid;
++  void activateExternalApplication(in long pid);
+ };

@@ -12,7 +12,11 @@ const BASE = "https://example.com/?standalone-phase3=";
 
 add_setup(async function () {
   await SpecialPowers.pushPrefEnv({
-    set: [["dom.require_user_interaction_for_beforeunload", false]],
+    set: [
+      ["dom.require_user_interaction_for_beforeunload", false],
+      ["zen.glance.enabled", true],
+      ["zen.view.drag-window-from-content", true],
+    ],
   });
   await gZenWorkspaces.promiseInitialized;
   registerCleanupFunction(async () => {
@@ -90,6 +94,26 @@ add_task(async function external_routing_and_workspace_exclusion() {
     await win.gZenWorkspaces.promiseInitialized;
     await win.gZenWorkspaces.promisePinnedInitialized;
     Assert.equal(win.gBrowser.tabs.length, 1, "One page only");
+    if (!SpecialPowers.isHeadless) {
+      const panel = win.docShell.treeOwner.QueryInterface(Ci.nsIBaseWindow);
+      const normal = window.docShell.treeOwner.QueryInterface(Ci.nsIBaseWindow);
+      Assert.ok(
+        Services.zen.isStandalonePanel(panel),
+        "Native standalone panel"
+      );
+      Assert.ok(
+        !Services.zen.isStandalonePanel(normal),
+        "Normal browser window"
+      );
+      const dock = Cc["@mozilla.org/widget/macdocksupport;1"].getService(
+        Ci.nsIMacDockSupport
+      );
+      Assert.greater(
+        dock.getWindowNumber(normal),
+        0,
+        "Keep target has a native window ID"
+      );
+    }
     Assert.ok(
       !win.gZenWorkspaces.shouldHaveWorkspaces,
       "No workspace lifecycle"
@@ -163,6 +187,15 @@ add_task(async function standalone_chrome_is_minimal() {
       !isEffectivelyHidden(document.getElementById("urlbar-container")),
       "Address bar remains visible"
     );
+    const actors = await SpecialPowers.spawn(
+      win.gBrowser.selectedBrowser,
+      [],
+      () =>
+        ["ZenGlance", "ZenWindowDrag"].map(
+          name => !!content.windowGlobalChild.getActor(name)
+        )
+    );
+    Assert.deepEqual(actors, [true, true], "Standalone content actors load");
     Assert.ok(
       !isEffectivelyHidden(
         document.getElementById("zen-standalone-window-keep")
@@ -361,10 +394,7 @@ add_task(async function session_exclusion_and_undo_close() {
       () => tab.linkedBrowser.currentURI?.spec === BASE + "undo",
       "Undo restores the page"
     );
-    Assert.ok(
-      !tab.ownerGlobal._zenStandaloneWindow,
-      "Recovery uses a normal window"
-    );
+    Assert.equal(tab.ownerDocument, document, "Recovery uses the normal window");
     Assert.equal(
       tab.getAttribute("zen-workspace-id"),
       gZenWorkspaces.activeWorkspace,
@@ -556,15 +586,16 @@ add_task(async function picker_filters_and_keeps_in_selected_space() {
   let win, tab;
   try {
     win = await openStandalone("picker");
-    Assert.ok(manager.openStandaloneSpacePicker(win), "Picker opens");
+    await SimpleTest.promiseFocus(win);
     const document = win.document;
     const panel = document.getElementById(
       "PanelUI-zen-standalone-window-spaces"
     );
-    await TestUtils.waitForCondition(
-      () => panel.state === "open",
-      "Picker is visible"
+    const shown = BrowserTestUtils.waitForEvent(panel, "popupshown");
+    EventUtils.synthesizeMouseAtCenter(
+      win.ZenExternalLinkStandalone.toolbar.spacePickerButton, {}, win
     );
+    await shown;
     const list = document.getElementById(
       "PanelUI-zen-standalone-window-spaces-list"
     );

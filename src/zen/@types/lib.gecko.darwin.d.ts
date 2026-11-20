@@ -53,6 +53,9 @@ declare global {
     readonly millisecondsSinceApplicationActivated: i64;
     hideApplication(): void;
     makeWindowJoinActiveSpace(aWindow: nsIBaseWindow): void;
+    readonly externalApplicationPid: i32;
+    activateExternalApplication(pid: i32): void;
+    getWindowNumber(aWindow: nsIBaseWindow): u32;
     badgeText: string;
     setBadgeImage(
       aBadgeImage: imgIContainer,

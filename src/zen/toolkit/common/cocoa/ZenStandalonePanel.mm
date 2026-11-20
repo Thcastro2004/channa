@@ -66,19 +66,12 @@ bool ZenWindowActsAsMain(NSWindow* aWindow) {
   NSWindowStyleMask style =
       aStyleMask | NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
       NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable |
-      NSWindowStyleMaskFullSizeContentView |
-      NSWindowStyleMaskNonactivatingPanel;
+      NSWindowStyleMaskFullSizeContentView;
   self = [super initWithContentRect:aContentRect
                           styleMask:style
                             backing:aBackingType
                               defer:aFlag];
   if (self) {
-    // Everything below turns the panel's auxiliary defaults back into
-    // ordinary window behaviour. What is deliberately kept is the
-    // non-activating role above: because the application is never activated,
-    // AppKit has no application Space to place this window on and puts it on
-    // the Space the user is looking at. That is the whole reason this is a
-    // panel and not a ToolbarWindow.
     self.floatingPanel = NO;
     self.hidesOnDeactivate = NO;
     self.worksWhenModal = YES;
@@ -101,13 +94,13 @@ bool ZenWindowActsAsMain(NSWindow* aWindow) {
   return YES;
 }
 
-// Staying auxiliary is what makes AppKit place this window on the Space the
-// user is looking at instead of the one Zen's other windows live on. A
-// non-activating panel can still become key and main within its own
-// application, which Gecko needs for mouse input and menu routing while the
-// application itself remains inactive.
 - (BOOL)canBecomeMainWindow {
   return YES;
+}
+
+// Window managers should assign standalone pages to a workspace.
+- (NSAccessibilitySubrole)accessibilitySubrole {
+  return NSAccessibilityStandardWindowSubrole;
 }
 
 // A standalone is never a fullscreen-primary window. Gecko reapplies native
@@ -123,11 +116,11 @@ bool ZenWindowActsAsMain(NSWindow* aWindow) {
   [super setCollectionBehavior:aBehavior];
 }
 
-// NSPanel's non-activating path can skip AppKit's usual deminiaturization when
-// selected through the Window menu or Command-` cycling.
 - (void)makeKeyAndOrderFront:(id)aSender {
-  [self orderFrontRegardless];
-  [self makeKeyWindow];
+  [super makeKeyAndOrderFront:aSender];
+  if (!NSApp.active && self.keyWindow) {
+    [NSRunningApplication.currentApplication activateWithOptions:0];
+  }
 }
 
 - (void)orderFrontRegardless {
@@ -135,12 +128,6 @@ bool ZenWindowActsAsMain(NSWindow* aWindow) {
     [self deminiaturize:nil];
   }
   [super orderFrontRegardless];
-}
-
-// Gecko changes the style mask during fullscreen and chrome transitions. The
-// window must retain its non-activating role through those changes.
-- (void)setStyleMask:(NSWindowStyleMask)aStyleMask {
-  [super setStyleMask:aStyleMask | NSWindowStyleMaskNonactivatingPanel];
 }
 
 - (void)setHidesOnDeactivate:(BOOL)aHides {

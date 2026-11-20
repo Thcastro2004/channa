@@ -11,6 +11,7 @@ const lazy = {};
 ChromeUtils.defineESModuleGetters(lazy, {
   BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.sys.mjs",
   SessionStore: "resource:///modules/sessionstore/SessionStore.sys.mjs",
+  Subprocess: "resource://gre/modules/Subprocess.sys.mjs",
   setTimeout: "resource://gre/modules/Timer.sys.mjs",
   clearTimeout: "resource://gre/modules/Timer.sys.mjs",
   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.sys.mjs",
@@ -37,6 +38,15 @@ ChromeUtils.defineLazyGetter(lazy, "MacDockSupport", () => {
       makeWindowJoinActiveSpace(baseWindow) {
         service.makeWindowJoinActiveSpace(baseWindow);
       },
+      get externalApplicationPid() {
+        return service.externalApplicationPid;
+      },
+      activateExternalApplication(pid) {
+        service.activateExternalApplication(pid);
+      },
+      getWindowNumber(baseWindow) {
+        return service.getWindowNumber(baseWindow);
+      },
       activateApplication(ignoreOtherApplications = false) {
         service.activateApplication(ignoreOtherApplications);
       },
@@ -53,8 +63,6 @@ ChromeUtils.defineLazyGetter(lazy, "MacDockSupport", () => {
 export const ZEN_STANDALONE_WINDOW_TYPE = "zen:external-link-standalone";
 // An activation this recent may belong to the incoming link.
 const STANDALONE_WINDOW_ACTIVATION_WINDOW_MS = 2000;
-// Earlier deactivations are AppKit settling focus, not a user visit.
-const STANDALONE_WINDOW_FOCUS_SETTLE_MS = 1500;
 // Offset successive panels, wrapping after eight to avoid drifting offscreen.
 const STANDALONE_WINDOW_CASCADE_STEP = 28;
 const STANDALONE_WINDOW_CASCADE_LENGTH = 8;
@@ -185,6 +193,7 @@ export class nsZenStandaloneWindowManager {
       uriString,
       openerWindow: liveOpener,
       source: "external",
+      sourcePid: options?.sourcePid ?? lazy.MacDockSupport?.externalApplicationPid,
       isPrivate,
       triggeringPrincipal: options?.triggeringPrincipal ?? null,
       referrerInfo: options?.referrerInfo ?? null,
@@ -193,6 +202,7 @@ export class nsZenStandaloneWindowManager {
       targetRoute:
         options?.targetRoute ?? this.getDefaultKeepTargetRoute(liveOpener),
       broughtApplicationForward: this.wasApplicationJustActivated(),
+      openedFromBackground: lazy.MacDockSupport?.isApplicationActive === false,
     };
   }
 
@@ -229,7 +239,8 @@ export class nsZenStandaloneWindowManager {
         private: request.isPrivate,
         features: this.getStandaloneWindowFeatures(request),
         all: true,
-        openerWindow: request.openerWindow,
+        // The keep destination may be on another desktop. Open independently.
+        openerWindow: null,
         args,
         zenSyncedWindow: false,
         zenStandaloneWindow: true,
@@ -243,10 +254,9 @@ export class nsZenStandaloneWindowManager {
       standaloneWindow.ZenExternalLinkStandaloneType =
         ZEN_STANDALONE_WINDOW_TYPE;
       this.makeWindowFollowTheUser(standaloneWindow);
-      if (request.userContextId) {
-        standaloneWindow._zenStartupUnsyncedUserContextId =
-          request.userContextId;
-      }
+      standaloneWindow._zenStartupUnsyncedUserContextId =
+        request.userContextId ||
+        request.openerWindow?.gZenWorkspaces?.getCurrentSpaceContainerId?.() || 0;
       return standaloneWindow;
     } catch (error) {
       if (nativePanelPrepared) {
@@ -256,19 +266,6 @@ export class nsZenStandaloneWindowManager {
       }
       console.error("Failed to construct Zen standalone window", error);
       return null;
-    }
-  }
-
-  /**
-   * Focuses the native non-activating panel without activating Zen.
-   *
-   * @param {Window} standaloneWindow - Standalone browser window.
-   */
-  presentExternalStandaloneWindow(standaloneWindow) {
-    try {
-      standaloneWindow.focus();
-    } catch (error) {
-      console.error("Failed to focus a new Zen standalone window", error);
     }
   }
 
@@ -322,6 +319,8 @@ export class nsZenStandaloneWindowManager {
       uriString: request.uriString,
       openerWindow: request.openerWindow,
       targetRoute: request.targetRoute,
+      sourcePid: request.sourcePid,
+      openedFromBackground: request.openedFromBackground,
       broughtApplicationForward: request.broughtApplicationForward,
       triggeringPrincipal: request.triggeringPrincipal,
       referrerInfo: request.referrerInfo,
@@ -332,8 +331,9 @@ export class nsZenStandaloneWindowManager {
       toolbar: null,
       isKeeping: false,
       isClosing: false,
+      returnedFocusToPreviousApplication: false,
       closedTabRecorded: false,
-      visitedNormalWindow: false,
+      lastNormalWindowVisitAt: 0,
       deactivateListener: null,
       commandListener: null,
       initialNormalBounds: null,
@@ -350,6 +350,10 @@ export class nsZenStandaloneWindowManager {
       standaloneWindow.removeEventListener("unload", onUnload);
       Services.obs.removeObserver(onClosed, "domwindowclosed");
       this.#resolveStandaloneWindowReady(standaloneWindow);
+      // domwindowclosed can reach us before SessionStore sends SSWindowClosing.
+      if (!state.closedTabRecorded && !state.isKeeping) {
+        this.onStandaloneWindowClosing(standaloneWindow);
+      }
       this.onStandaloneWindowClosed(standaloneWindow);
     };
     const onUnload = event => {
@@ -419,11 +423,13 @@ export class nsZenStandaloneWindowManager {
       return false;
     }
 
+    const sourcePid = lazy.MacDockSupport?.externalApplicationPid;
     const requests = uris.map(uriString =>
       this.createExternalLinkStandaloneWindowRequest({
         uriString,
         options: {
           ...options,
+          sourcePid,
           requestId:
             options.requestId && uris.length == 1
               ? options.requestId
@@ -443,7 +449,7 @@ export class nsZenStandaloneWindowManager {
       (options.isApplicationLaunch === true || hadDeferredStartupWindow) &&
       Services.prefs.getBoolPref(
         "zen.standalone-window.launch-stays-in-background",
-        true
+        false
       );
     if (keepLaunchInBackground) {
       this.#handBackLaunchActivation();
@@ -454,6 +460,7 @@ export class nsZenStandaloneWindowManager {
         uriString: request.uriString,
         options: {
           ...options,
+          sourcePid,
           requestId: request.requestId,
           deliverySource: request.deliverySource,
           isPrivate: request.isPrivate,
@@ -791,6 +798,7 @@ export class nsZenStandaloneWindowManager {
     if (!state || state.isKeeping || state.closedTabRecorded) {
       return;
     }
+    this.maybeReturnFocusToPreviousApplication(win, state);
     this.#armTrailingCloseGestureSuppression(win);
     const tab = win.gBrowser?.selectedTab;
     const target = this.getStandaloneArchiveTargetWindow(win);
@@ -848,9 +856,6 @@ export class nsZenStandaloneWindowManager {
     state.geometryListeners = null;
     this.cleanupStandaloneToolbar(win);
     win.ZenExternalLinkStandalone = null;
-    if (!state.isKeeping) {
-      this.maybeReturnFocusToPreviousApplication(win, state);
-    }
   }
 
   cleanupStandaloneToolbar(win) {
@@ -893,14 +898,14 @@ export class nsZenStandaloneWindowManager {
 
   watchForNormalWindowVisits(win) {
     const state = win.ZenExternalLinkStandalone;
-    const readyAt = Date.now();
     state.deactivateListener = () => {
       // FocusManager receives the newly active window on the next turn.
       Services.tm.dispatchToMainThread(() => {
         if (
           win.closed ||
+          state.isClosing ||
           !win.ZenExternalLinkStandalone ||
-          Date.now() - readyAt < STANDALONE_WINDOW_FOCUS_SETTLE_MS
+          !lazy.MacDockSupport?.isApplicationActive
         ) {
           return;
         }
@@ -911,7 +916,7 @@ export class nsZenStandaloneWindowManager {
           active.gBrowser &&
           !active._zenStandaloneWindow
         ) {
-          state.visitedNormalWindow = true;
+          state.lastNormalWindowVisitAt = Date.now();
         }
       });
     };
@@ -920,9 +925,11 @@ export class nsZenStandaloneWindowManager {
 
   maybeReturnFocusToPreviousApplication(win, state) {
     if (
-      !lazy.MacDockSupport ||
-      !state.broughtApplicationForward ||
-      state.visitedNormalWindow ||
+      !lazy.MacDockSupport?.isApplicationActive ||
+      state.returnedFocusToPreviousApplication ||
+      (state.lastNormalWindowVisitAt &&
+        lazy.MacDockSupport.millisecondsSinceApplicationActivated >=
+          Date.now() - state.lastNormalWindowVisitAt) ||
       this.hasOtherStandaloneWindows(win) ||
       !Services.prefs.getBoolPref(
         "zen.standalone-window.return-focus-on-close",
@@ -932,7 +939,16 @@ export class nsZenStandaloneWindowManager {
       return;
     }
     try {
-      lazy.MacDockSupport.activatePreviousApplication();
+      state.returnedFocusToPreviousApplication = true;
+      const targetPid =
+        lazy.MacDockSupport.externalApplicationPid || state.sourcePid;
+      if (targetPid) {
+        lazy.MacDockSupport.activateExternalApplication(targetPid);
+        return;
+      }
+      if (state.broughtApplicationForward || state.openedFromBackground) {
+        lazy.MacDockSupport.activatePreviousApplication();
+      }
     } catch (error) {
       console.error(
         "Cannot return standalone focus to the previous application",
@@ -1164,6 +1180,43 @@ export class nsZenStandaloneWindowManager {
       console.error("Cannot activate Zen for a kept page", error);
     }
     target.focus();
+    const base = target.docShell.treeOwner.QueryInterface(Ci.nsIBaseWindow);
+    const id = String(lazy.MacDockSupport?.getWindowNumber(base));
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (target.closed || target.gBrowser.selectedTab !== tab) {
+        return;
+      }
+      if (await this.#aeroSpace(["focus", "--window-id", id]) !== null &&
+          (await this.#focusedAeroSpaceWindow())?.id === id) {
+        return;
+      }
+      await new Promise(resolve => lazy.setTimeout(resolve, 100));
+    }
+  }
+
+  async #focusedAeroSpaceWindow() {
+    const output = await this.#aeroSpace(["list-windows", "--focused", "--format",
+      "%{window-id} %{app-pid}"]);
+    const match = /^(\d+) (\d+)$/.exec(output ?? "");
+    return match ? { id: match[1], pid: Number(match[2]) } : null;
+  }
+
+  async #aeroSpace(args) {
+    try {
+      const environment = lazy.Subprocess.getEnvironment();
+      environment.PATH = [environment.PATH, "/opt/homebrew/bin", "/usr/local/bin"]
+        .filter(Boolean)
+        .join(":");
+      const command = await lazy.Subprocess.pathSearch("aerospace", environment);
+      const process = await lazy.Subprocess.call({
+        command,
+        arguments: args,
+      });
+      const output = await process.stdout.readString();
+      return (await process.wait()).exitCode === 0 ? output.trim() : null;
+    } catch {
+      return null;
+    }
   }
 
   onOpenInDefaultSpaceCommand(win) {
@@ -1689,12 +1742,9 @@ export class nsZenStandaloneWindowManager {
     }, STANDALONE_WINDOW_STRAY_WINDOW_WATCH_MS);
   }
 
-  #handBackLaunchActivation(win = null) {
+  #handBackLaunchActivation() {
     try {
       lazy.MacDockSupport?.activatePreviousApplication();
-      if (win && !win.closed) {
-        win.focus();
-      }
     } catch (error) {
       console.error("Cannot return launch activation", error);
     }
@@ -1706,10 +1756,10 @@ export class nsZenStandaloneWindowManager {
         if (
           !win.closed &&
           !win.ZenExternalLinkStandalone?.isKeeping &&
-          !win.ZenExternalLinkStandalone?.visitedNormalWindow &&
+          !win.ZenExternalLinkStandalone?.lastNormalWindowVisitAt &&
           lazy.MacDockSupport?.isApplicationActive
         ) {
-          this.#handBackLaunchActivation(win);
+          this.#handBackLaunchActivation();
         }
       }, delay);
     }
@@ -1774,6 +1824,12 @@ export class nsZenStandaloneWindowManager {
 
   #openRequest(request) {
     this.#logExternalRequest(request, "validated");
+    if (request.source === "external") {
+      if (request.sourcePid && !request.openerWindow?._zenStandaloneWindow) {
+        request.sourcePlacement = this.#aeroSpace(["list-windows", "--focused",
+          "--format", "%{app-pid}%{tab}%{window-is-fullscreen}%{tab}%{workspace}"]);
+      }
+    }
     const standaloneWindow = this.constructStandaloneWindow(request);
     if (!standaloneWindow) {
       this.#logExternalRequest(request, "failed", "native-create");
@@ -1781,9 +1837,25 @@ export class nsZenStandaloneWindowManager {
     }
     this.#logExternalRequest(request, "native-created");
     this.markWindowAsStandalone(standaloneWindow, request);
-    this.presentExternalStandaloneWindow(standaloneWindow);
 
-    this.#initializeStandaloneWindow(standaloneWindow).catch(error => {
+    this.#initializeStandaloneWindow(standaloneWindow).then(async () => {
+      const placement = await request.sourcePlacement;
+      const [pid, fullscreen, workspace] = placement?.split("\t") ?? [];
+      const state = standaloneWindow.ZenExternalLinkStandalone;
+      if (!workspace || Number(pid) !== request.sourcePid || fullscreen !== "false" ||
+          standaloneWindow.closed || !state || state.isKeeping || state.isClosing ||
+          state.lastNormalWindowVisitAt) {
+        return;
+      }
+      const base = standaloneWindow.docShell.treeOwner.QueryInterface(Ci.nsIBaseWindow);
+      const id = String(lazy.MacDockSupport.getWindowNumber(base));
+      const focused = await this.#focusedAeroSpaceWindow();
+      if (focused?.id === id && !standaloneWindow.closed && !state.isKeeping &&
+          !state.isClosing && !state.lastNormalWindowVisitAt) {
+        await this.#aeroSpace(["move-node-to-workspace", "--window-id", id,
+          "--focus-follows-window", "--", workspace]);
+      }
+    }).catch(error => {
       this.#logExternalRequest(request, "failed", "initialization");
       console.error("Could not initialize standalone window", error);
       this.#resolveStandaloneWindowReady(standaloneWindow);

@@ -45,7 +45,7 @@
 
 # zen stays inactive when standalone is open
 - name: zen.standalone-window.launch-stays-in-background
-  value: true
+  value: false
   condition: "defined(XP_MACOSX)"
 
 # delays startup sequence to open only the standalone (in ms)
