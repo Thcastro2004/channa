@@ -141,4 +141,14 @@ auto ZenCommonUtils::IsSharingSupported() -> bool {
 #endif
 }
 
+#ifndef XP_MACOSX
+NS_IMETHODIMP ZenCommonUtils::PrepareSearchPanel() { return NS_ERROR_NOT_IMPLEMENTED; }
+NS_IMETHODIMP ZenCommonUtils::ShowSearchPanel(nsIBaseWindow*) { return NS_ERROR_NOT_IMPLEMENTED; }
+NS_IMETHODIMP ZenCommonUtils::SetSearchHotkey(const nsACString&, uint16_t, bool* result) {
+  *result = false;
+  return NS_OK;
+}
+NS_IMETHODIMP ZenCommonUtils::ClearSearchHotkey() { return NS_OK; }
+#endif
+
 }  // namespace zen

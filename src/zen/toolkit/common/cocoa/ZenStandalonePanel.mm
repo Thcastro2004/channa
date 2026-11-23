@@ -8,13 +8,20 @@
 #include "nsIWidget.h"
 #include "nsThreadUtils.h"
 
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
 
 #import <AppKit/AppKit.h>
+#import <Carbon/Carbon.h>
+#include "mozilla/Preferences.h"
+#include "mozilla/Services.h"
+#include "nsIObserverService.h"
 
 enum class ZenPreparedPanelKind : uint8_t {
   None,
   Standalone,
+  Search,
 };
 
 static ZenPreparedPanelKind sPreparedPanelKind = ZenPreparedPanelKind::None;
@@ -47,8 +54,11 @@ extern void ZenWindowDestroyed(NSWindow* aWindow);
 }
 @end
 
+@interface ZenSearchPanel : ZenStandalonePanel
+@end
+
 bool ZenWindowActsAsMain(NSWindow* aWindow) {
-  return [aWindow isKindOfClass:[ZenStandalonePanel class]];
+  return [aWindow isMemberOfClass:[ZenStandalonePanel class]];
 }
 
 @implementation ZenStandalonePanel
@@ -67,12 +77,18 @@ bool ZenWindowActsAsMain(NSWindow* aWindow) {
       aStyleMask | NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
       NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable |
       NSWindowStyleMaskFullSizeContentView;
+  if ([self isKindOfClass:[ZenSearchPanel class]]) {
+    style = NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel;
+  }
   self = [super initWithContentRect:aContentRect
                           styleMask:style
                             backing:aBackingType
                               defer:aFlag];
   if (self) {
-    self.floatingPanel = NO;
+    self.floatingPanel = [self isKindOfClass:[ZenSearchPanel class]];
+    if (self.floatingPanel) {
+      self.level = NSFloatingWindowLevel;
+    }
     self.hidesOnDeactivate = NO;
     self.worksWhenModal = YES;
     self.becomesKeyOnlyIfNeeded = NO;
@@ -111,14 +127,19 @@ bool ZenWindowActsAsMain(NSWindow* aWindow) {
                  NSWindowCollectionBehaviorFullScreenAllowsTiling);
   aBehavior |= NSWindowCollectionBehaviorMoveToActiveSpace |
                NSWindowCollectionBehaviorFullScreenAuxiliary |
-               NSWindowCollectionBehaviorFullScreenDisallowsTiling |
-               NSWindowCollectionBehaviorParticipatesInCycle;
+               NSWindowCollectionBehaviorFullScreenDisallowsTiling;
+  if ([self isKindOfClass:[ZenSearchPanel class]]) {
+    aBehavior &= ~(NSWindowCollectionBehaviorManaged | NSWindowCollectionBehaviorParticipatesInCycle);
+    aBehavior |= NSWindowCollectionBehaviorTransient | NSWindowCollectionBehaviorIgnoresCycle;
+  } else {
+    aBehavior |= NSWindowCollectionBehaviorParticipatesInCycle;
+  }
   [super setCollectionBehavior:aBehavior];
 }
 
 - (void)makeKeyAndOrderFront:(id)aSender {
   [super makeKeyAndOrderFront:aSender];
-  if (!NSApp.active && self.keyWindow) {
+  if (ZenWindowActsAsMain(self) && !NSApp.active && self.keyWindow) {
     [NSRunningApplication.currentApplication activateWithOptions:0];
   }
 }
@@ -346,6 +367,47 @@ bool ZenWindowActsAsMain(NSWindow* aWindow) {
 
 @end
 
+static NSInteger sVisibleSearchPanel = -1;
+
+static constexpr char kSearchLeft[] = "zen.global-search.position.left";
+static constexpr char kSearchTop[] = "zen.global-search.position.top";
+static constexpr char kSearchDisplay[] = "zen.global-search.position.display";
+
+@implementation ZenSearchPanel
+- (void)rememberPosition:(NSNotification*)notification {
+  if (!self.screen || self.windowNumber != sVisibleSearchPanel) {
+    return;
+  }
+  NSRect bounds = self.screen.visibleFrame;
+  mozilla::Preferences::SetInt(kSearchLeft, lround(NSMinX(self.frame) - NSMinX(bounds)));
+  mozilla::Preferences::SetInt(kSearchTop, lround(NSMaxY(bounds) - NSMaxY(self.frame)));
+  mozilla::Preferences::SetUint(kSearchDisplay, [self.screen.deviceDescription[@"NSScreenNumber"] unsignedIntValue]);
+}
+- (void)resignKeyWindow {
+  [super resignKeyWindow];
+  NSInteger number = self.windowNumber;
+  NS_DispatchToMainThread(NS_NewRunnableFunction("ZenSearchResigned", [number] {
+    if (sVisibleSearchPanel == number && ![NSApp windowWithWindowNumber:number].keyWindow) {
+      sVisibleSearchPanel = -1;
+      if (nsCOMPtr<nsIObserverService> observers = mozilla::services::GetObserverService()) {
+        observers->NotifyObservers(nullptr, "zen-global-search-dismiss", nullptr);
+      }
+    }
+  }));
+}
+- (void)close {
+  [NSNotificationCenter.defaultCenter removeObserver:self name:NSWindowDidMoveNotification object:self];
+  if (sVisibleSearchPanel == self.windowNumber) {
+    sVisibleSearchPanel = -1;
+  }
+  [super close];
+}
+- (BOOL)canBecomeMainWindow { return NO; }
+- (void)setOpaque:(BOOL)opaque { [super setOpaque:NO]; }
+- (NSAccessibilityRole)accessibilityRole { return NSAccessibilityPopoverRole; }
+- (NSAccessibilitySubrole)accessibilitySubrole { return NSAccessibilityUnknownSubrole; }
+@end
+
 static NSWindow* NativeWindow(nsIBaseWindow* aWindow) {
   if (!aWindow) {
     return nil;
@@ -361,6 +423,9 @@ static NSWindow* NativeWindow(nsIBaseWindow* aWindow) {
 Class ZenConsumePreparedPanelClass() {
   ZenPreparedPanelKind preparedKind = sPreparedPanelKind;
   sPreparedPanelKind = ZenPreparedPanelKind::None;
+  if (preparedKind == ZenPreparedPanelKind::Search) {
+    return [ZenSearchPanel class];
+  }
   return preparedKind == ZenPreparedPanelKind::Standalone
              ? [ZenStandalonePanel class]
              : Nil;
@@ -375,13 +440,187 @@ void ZenCommonUtils::PrepareStandalonePanelInternal() {
 
 void ZenCommonUtils::CancelPreparedStandalonePanelInternal() {
   MOZ_ASSERT(NS_IsMainThread());
-  if (sPreparedPanelKind == ZenPreparedPanelKind::Standalone) {
-    sPreparedPanelKind = ZenPreparedPanelKind::None;
-  }
+  sPreparedPanelKind = ZenPreparedPanelKind::None;
 }
 
 bool ZenCommonUtils::IsStandalonePanelInternal(nsIBaseWindow* aWindow) {
-  return [NativeWindow(aWindow) isKindOfClass:[ZenStandalonePanel class]];
+  return ZenWindowActsAsMain(NativeWindow(aWindow));
+}
+
+NS_IMETHODIMP ZenCommonUtils::PrepareSearchPanel() {
+  sPreparedPanelKind = ZenPreparedPanelKind::Search;
+  return NS_OK;
+}
+
+NS_IMETHODIMP ZenCommonUtils::ShowSearchPanel(nsIBaseWindow* base) {
+  NSWindow* panel = NativeWindow(base);
+  if (![panel isKindOfClass:[ZenSearchPanel class]]) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+  nsCOMPtr<nsIWidget> widget = base->GetMainWidget();
+  widget->SetTransparencyMode(mozilla::widget::TransparencyMode::Transparent);
+  NSScreen* screen = NSScreen.mainScreen;
+  for (NSScreen* candidate in NSScreen.screens) {
+    if (NSMouseInRect(NSEvent.mouseLocation, candidate.frame, NO)) {
+      screen = candidate;
+      break;
+    }
+  }
+  uint32_t display = mozilla::Preferences::GetUint(kSearchDisplay);
+  for (NSScreen* candidate in NSScreen.screens) {
+    if ([candidate.deviceDescription[@"NSScreenNumber"] unsignedIntValue] == display) {
+      screen = candidate;
+      break;
+    }
+  }
+  NSRect bounds = screen.visibleFrame;
+  NSSize size = NSMakeSize(MIN(680, bounds.size.width), MIN(480, bounds.size.height));
+  // Keep the input anchored while the results grow underneath it.
+  CGFloat top = NSMaxY(bounds) - MIN(bounds.size.height / 4, bounds.size.height - size.height);
+  CGFloat left = NSMidX(bounds) - size.width / 2;
+  if (display) {
+    left = NSMinX(bounds) + std::clamp<CGFloat>(mozilla::Preferences::GetInt(kSearchLeft), 0, bounds.size.width - size.width);
+    top = NSMaxY(bounds) - std::clamp<CGFloat>(mozilla::Preferences::GetInt(kSearchTop), 0, bounds.size.height - size.height);
+  }
+  panel.level = NSFloatingWindowLevel;
+  panel.backgroundColor = NSColor.clearColor;
+  panel.hasShadow = NO;
+  panel.contentMinSize = NSMakeSize(1, 1);
+  [panel setFrame:NSMakeRect(left, top - size.height,
+                             size.width, size.height) display:YES];
+  [NSApp removeWindowsItem:panel];
+  [panel orderFrontRegardless];
+  [panel makeKeyWindow];
+  sVisibleSearchPanel = panel.windowNumber;
+  [NSNotificationCenter.defaultCenter addObserver:panel selector:@selector(rememberPosition:)
+                                             name:NSWindowDidMoveNotification object:panel];
+  return NS_OK;
+}
+
+static EventHotKeyRef sHotkey;
+static EventHandlerRef sHandler;
+static UInt32 sHotkeyId;
+
+static OSStatus SearchHotkeyPressed(EventHandlerCallRef, EventRef event, void*) {
+  EventHotKeyID id{};
+  if (GetEventParameter(event, kEventParamDirectObject, typeEventHotKeyID,
+                        nullptr, sizeof(id), nullptr, &id) != noErr ||
+      id.signature != 'ZenS' || !sHotkey || id.id != sHotkeyId) {
+    return eventNotHandledErr;
+  }
+  NS_DispatchToMainThread(NS_NewRunnableFunction("ZenSearchShortcut", [] {
+    if (nsCOMPtr<nsIObserverService> observers = mozilla::services::GetObserverService()) {
+      observers->NotifyObservers(nullptr, "zen-global-search", nullptr);
+    }
+  }));
+  return noErr;
+}
+
+NS_IMETHODIMP ZenCommonUtils::SetSearchHotkey(const nsACString& code,
+                                              uint16_t modifiers, bool* result) {
+  *result = false;
+  if (!(modifiers & 7) || modifiers > 15) {
+    return NS_OK;
+  }
+  static const struct { const char* code; UInt32 key; } keys[] = {
+    {"KeyA", kVK_ANSI_A},
+    {"KeyB", kVK_ANSI_B},
+    {"KeyC", kVK_ANSI_C},
+    {"KeyD", kVK_ANSI_D},
+    {"KeyE", kVK_ANSI_E},
+    {"KeyF", kVK_ANSI_F},
+    {"KeyG", kVK_ANSI_G},
+    {"KeyH", kVK_ANSI_H},
+    {"KeyI", kVK_ANSI_I},
+    {"KeyJ", kVK_ANSI_J},
+    {"KeyK", kVK_ANSI_K},
+    {"KeyL", kVK_ANSI_L},
+    {"KeyM", kVK_ANSI_M},
+    {"KeyN", kVK_ANSI_N},
+    {"KeyO", kVK_ANSI_O},
+    {"KeyP", kVK_ANSI_P},
+    {"KeyQ", kVK_ANSI_Q},
+    {"KeyR", kVK_ANSI_R},
+    {"KeyS", kVK_ANSI_S},
+    {"KeyT", kVK_ANSI_T},
+    {"KeyU", kVK_ANSI_U},
+    {"KeyV", kVK_ANSI_V},
+    {"KeyW", kVK_ANSI_W},
+    {"KeyX", kVK_ANSI_X},
+    {"KeyY", kVK_ANSI_Y},
+    {"KeyZ", kVK_ANSI_Z},
+    {"Digit0", kVK_ANSI_0},
+    {"Digit1", kVK_ANSI_1},
+    {"Digit2", kVK_ANSI_2},
+    {"Digit3", kVK_ANSI_3},
+    {"Digit4", kVK_ANSI_4},
+    {"Digit5", kVK_ANSI_5},
+    {"Digit6", kVK_ANSI_6},
+    {"Digit7", kVK_ANSI_7},
+    {"Digit8", kVK_ANSI_8},
+    {"Digit9", kVK_ANSI_9},
+    {"F1", kVK_F1},
+    {"F2", kVK_F2},
+    {"F3", kVK_F3},
+    {"F4", kVK_F4},
+    {"F5", kVK_F5},
+    {"F6", kVK_F6},
+    {"F7", kVK_F7},
+    {"F8", kVK_F8},
+    {"F9", kVK_F9},
+    {"F10", kVK_F10},
+    {"F11", kVK_F11},
+    {"F12", kVK_F12},
+    {"F13", kVK_F13},
+    {"F14", kVK_F14},
+    {"F15", kVK_F15},
+    {"F16", kVK_F16},
+    {"F17", kVK_F17},
+    {"F18", kVK_F18},
+    {"F19", kVK_F19},
+    {"F20", kVK_F20},
+  };
+  for (const auto& entry : keys) {
+    if (!code.Equals(entry.code)) {
+      continue;
+    }
+    if (!sHandler) {
+      EventTypeSpec press = {kEventClassKeyboard, kEventHotKeyPressed};
+      if (InstallApplicationEventHandler(SearchHotkeyPressed, 1, &press,
+                                         nullptr, &sHandler) != noErr) {
+        return NS_OK;
+      }
+    }
+    UInt32 flags = ((modifiers & 1) ? controlKey : 0) |
+                   ((modifiers & 2) ? cmdKey : 0) |
+                   ((modifiers & 4) ? optionKey : 0) |
+                   ((modifiers & 8) ? shiftKey : 0);
+    EventHotKeyRef replacement;
+    EventHotKeyID id = {'ZenS', sHotkeyId + 1};
+    if (RegisterEventHotKey(entry.key, flags, id, GetApplicationEventTarget(),
+                            0, &replacement) == noErr) {
+      if (sHotkey) {
+        UnregisterEventHotKey(sHotkey);
+      }
+      sHotkey = replacement;
+      sHotkeyId = id.id;
+      *result = true;
+    }
+    break;
+  }
+  return NS_OK;
+}
+
+NS_IMETHODIMP ZenCommonUtils::ClearSearchHotkey() {
+  if (sHotkey) {
+    UnregisterEventHotKey(sHotkey);
+    sHotkey = nullptr;
+  }
+  if (sHandler) {
+    RemoveEventHandler(sHandler);
+    sHandler = nullptr;
+  }
+  return NS_OK;
 }
 
 }  // namespace zen

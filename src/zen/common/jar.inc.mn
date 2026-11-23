@@ -35,3 +35,6 @@
         content/browser/zen-styles/zen-panels/bookmarks.css                     (../../zen/common/styles/zen-panels/bookmarks.css)
         content/browser/zen-styles/zen-panels/print.css                         (../../zen/common/styles/zen-panels/print.css)
         content/browser/zen-styles/zen-panels/dialog.css                        (../../zen/common/styles/zen-panels/dialog.css)
+        content/browser/zen-global-search.js (../../zen/standalone-window/ZenGlobalSearch.js)
+        content/browser/zen-global-search.xhtml (../../zen/standalone-window/ZenGlobalSearch.xhtml)
+        content/browser/zen-global-search.css (../../zen/standalone-window/ZenGlobalSearch.css)

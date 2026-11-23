@@ -710,8 +710,52 @@ var gZenLooksAndFeel = {
   },
 };
 
+function initGlobalSearchShortcut() {
+  const button = document.getElementById("zenSearchShortcut");
+  if (!button) {
+    return;
+  }
+  const { gZenGlobalSearch, shortcutPref, recordShortcut, formatShortcut } =
+    ChromeUtils.importESModule("resource:///modules/zen/standalonewindow/ZenGlobalSearch.sys.mjs");
+  const status = document.getElementById("zenSearchShortcutStatus");
+  let recording = false;
+  function refresh() {
+    recording = false;
+    button.disabled = !gZenGlobalSearch.enabled;
+    button.textContent = formatShortcut(Services.prefs.getStringPref(shortcutPref, "meta,alt|KeyT"));
+    document.l10n.setAttributes(status, gZenGlobalSearch.available
+      ? "zen-search-shortcut-help" : "zen-search-shortcut-unavailable");
+  }
+  button.addEventListener("click", () => {
+    recording = true;
+    document.l10n.setAttributes(status, "zen-search-shortcut-record");
+  });
+  button.addEventListener("keydown", event => {
+    if (!recording || event.key === "Tab") {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.key === "Escape") {
+      refresh();
+      return;
+    }
+    const value = recordShortcut(event);
+    if (value) {
+      Services.prefs.setStringPref(shortcutPref, value);
+      refresh();
+    }
+  });
+  button.addEventListener("blur", refresh);
+  Services.obs.addObserver(refresh, "zen-global-search-shortcut-changed");
+  window.addEventListener("unload", () =>
+    Services.obs.removeObserver(refresh, "zen-global-search-shortcut-changed"), { once: true });
+  refresh();
+}
+
 var gZenWorkspacesSettings = {
   init() {
+    initGlobalSearchShortcut();
     var tabsUnloaderPrefListener = {
       async observe() {
         let buttonIndex = await confirmRestartPrompt(true, 1, true, true);

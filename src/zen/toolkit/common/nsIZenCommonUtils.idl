@@ -10,7 +10,7 @@ interface nsIBaseWindow;
 /**
  * @brief Common utility functions for Zen.
  */
-[scriptable, uuid(49cde8bf-43f5-4d62-bb65-5abd61c15971)]
+[scriptable, uuid(78bdf1a0-7df6-45de-a497-17292404ab32)]
 interface nsIZenCommonUtils : nsISupports {
   /*
    * @brief Share using the native share dialog.
@@ -42,4 +42,8 @@ interface nsIZenCommonUtils : nsISupports {
   void prepareStandalonePanel();
   void cancelPreparedStandalonePanel();
   boolean isStandalonePanel(in nsIBaseWindow window);
+  void prepareSearchPanel();
+  void showSearchPanel(in nsIBaseWindow window);
+  boolean setSearchHotkey(in ACString code, in unsigned short modifiers);
+  void clearSearchHotkey();
 };

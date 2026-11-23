@@ -1034,6 +1034,8 @@ export class nsZenStandaloneWindowManager {
     }
     state.isKeeping = true;
     try {
+      const sourceBase = win.docShell.treeOwner.QueryInterface(Ci.nsIBaseWindow);
+      const sourceId = lazy.MacDockSupport?.getWindowNumber(sourceBase);
       let tab = this.adoptStandaloneTab(win, target, workspace);
       if (!tab) {
         // A reload fallback unloads the original page. Ask before creating a
@@ -1053,11 +1055,11 @@ export class nsZenStandaloneWindowManager {
       }
       // Close before reveal: while this panel is visible, activating Zen keeps
       // the user on its Space instead of following the destination window.
-      if (!win.closed && !this.closeStandaloneWindow(win)) {
+      if (!win.closed && !state.isClosing && !this.closeStandaloneWindow(win)) {
         state.isKeeping = false;
         return false;
       }
-      this.#revealKeptTab(target, tab, workspace, win).catch(console.error);
+      this.#revealKeptTab(target, tab, workspace, win, sourceId).catch(console.error);
       return true;
     } catch (error) {
       state.isKeeping = false;
@@ -1145,7 +1147,7 @@ export class nsZenStandaloneWindowManager {
     );
   }
 
-  async #revealKeptTab(target, tab, workspace, win) {
+  async #revealKeptTab(target, tab, workspace, win, sourceId) {
     if (target.closed || tab.closing) {
       return;
     }
@@ -1186,7 +1188,23 @@ export class nsZenStandaloneWindowManager {
       if (target.closed || target.gBrowser.selectedTab !== tab) {
         return;
       }
-      if (await this.#aeroSpace(["focus", "--window-id", id]) !== null &&
+      const windows = await this.#aeroSpace(["list-windows", "--monitor", "all",
+        "--pid", String(Services.appinfo.processID), "--format", "%{window-id}%{tab}%{workspace}"]);
+      if (!windows || target.closed || target.gBrowser.selectedTab !== tab) {
+        return;
+      }
+      const placements = new Map(windows.split("\n").map(line => line.split("\t")));
+      // AeroSpace can restore the old workspace as it removes the closed panel.
+      if (placements.has(String(sourceId)) && attempt < 2) {
+        await new Promise(resolve => lazy.setTimeout(resolve, 100));
+        continue;
+      }
+      const desktop = placements.get(id);
+      if (desktop) {
+        await this.#aeroSpace(["workspace", "--", desktop]);
+      }
+      if (!target.closed && target.gBrowser.selectedTab === tab &&
+          await this.#aeroSpace(["focus", "--window-id", id]) !== null &&
           (await this.#focusedAeroSpaceWindow())?.id === id) {
         return;
       }
@@ -1774,7 +1792,7 @@ export class nsZenStandaloneWindowManager {
   createGlobalSearchStandaloneWindowRequest(options) {
     const request = this.createExternalLinkStandaloneWindowRequest({
       uriString: options.uriString,
-      options: { ...options, isPrivate: false },
+      options: { ...options, isPrivate: options.isPrivate === true },
       openerWindow: null,
     });
     return request

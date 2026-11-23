@@ -1,0 +1,54 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+:root, body, #navigator-toolbox, #nav-bar, #urlbar-container {
+  appearance: none !important;
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+:root, body {
+  overflow: hidden;
+  color-scheme: light dark;
+}
+
+#navigator-toolbox::before, #navigator-toolbox::after, body::before {
+  display: none !important;
+}
+
+:root #urlbar[zen-floating-urlbar] {
+  position: fixed !important;
+  inset: 0 auto auto 0 !important;
+  translate: none !important;
+  margin: 0 !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  height: auto !important;
+  max-height: 100vh;
+  overflow: clip;
+  border-radius: var(--border-radius-medium, 12px);
+  background-color: var(--zen-urlbar-background, Canvas);
+  color: var(--toolbar-field-text-color-focus, CanvasText);
+}
+
+.urlbar-input-container {
+  min-height: var(--urlbar-container-height, 62px);
+}
+
+#urlbar .urlbar-input-container,
+#urlbar .urlbar-input-container * {
+  -moz-window-dragging: drag;
+}
+
+.urlbarView {
+  overflow-y: auto;
+  max-height: calc(100vh - var(--urlbar-container-height, 62px));
+}
+
+.urlbarView-button[data-action="tabswitch"] {
+  display: none;
+}

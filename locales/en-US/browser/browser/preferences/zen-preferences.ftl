@@ -108,6 +108,11 @@ zen-settings-workspaces-enabled =
 zen-settings-workspaces-hide-default-container-indicator =
     .label = Hide the default container indicator in the tab bar
 
+zen-search-shortcut-name = Global search shortcut
+zen-search-shortcut-help = Choose the shortcut to change it.
+zen-search-shortcut-record = Press a letter, number, or function key with Command, Option, or Control. Press Escape to cancel.
+zen-search-shortcut-unavailable = macOS could not register that shortcut. Choose another combination.
+
 zen-standalone-window-header = Standalone windows
 zen-standalone-window-description = Open external links in lightweight standalone windows and summon Zen search from anywhere on macOS.
 zen-standalone-window-enabled =
